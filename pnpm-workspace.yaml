@@ -1,0 +1,20 @@
+packages:
+  - 'packages/*'
+  - docs
+  - examples
+allowBuilds:
+  esbuild: true
+  protobufjs: true
+  sharp: true
+catalog:
+  '@cloudflare/workers-types': ^4.20260516.1
+  '@total-typescript/tsconfig': ^1.0.4
+  typescript: ^6.0.3
+  zod: ^4.4.3
+minimumReleaseAge: 7200
+minimumReleaseAgeExclude:
+  - 'orphos'
+  - 'sst'
+registries:
+  "@jsr": https://npm.jsr.io/
+  default: https://registry.npmjs.org/

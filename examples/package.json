@@ -1,0 +1,23 @@
+{
+  "name": "aurelian-examples",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.tsx",
+    "start": "tsx src/index.tsx",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.6",
+    "aurelian": "workspace:*",
+    "hono": "^4.12.18",
+    "jose": "^6.2.3",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2",
+    "tsx": "^4.21.0",
+    "typescript": "catalog:",
+    "vite": "^8.0.11"
+  }
+}
