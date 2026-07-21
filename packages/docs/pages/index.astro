@@ -1,0 +1,36 @@
+---
+import PageLayout from 'blume/components/layout/PageLayout.astro';
+import data from 'blume:data';
+
+import Landing from '../components/landing.astro';
+
+const { config } = data;
+
+const page = {
+  description: 'Authentication infrastructure for applications that own user data.',
+  route: '/',
+  title: 'Aurelian',
+} as const;
+---
+
+<PageLayout
+  analytics={config.analytics}
+  banner={config.banner}
+  clientData={{
+    config: data.config,
+    navigation: data.navigation,
+    page: { route: page.route, title: page.title }
+  }}
+  favicon={config.favicon}
+  fontCssVars={data.fontCssVars}
+  logo={config.logo}
+  navigation={data.navigation}
+  ogEnabled={config.og.enabled}
+  page={page}
+  searchEnabled={config.search.enabled}
+  site={{ description: config.description, title: config.title }}
+  siteUrl={config.site}
+  themeMode={config.theme.mode}
+>
+  <Landing />
+</PageLayout>

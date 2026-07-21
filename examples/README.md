@@ -1,4 +1,4 @@
-# Aurelian Client + Hono Example
+# Aurelian Hono Example
 
 Runnable example with a Hono auth server and a browser client that imports `aurelian/client`.
 
@@ -9,25 +9,22 @@ pnpm --filter aurelian build
 pnpm --filter aurelian-examples dev
 ```
 
-The auth server listens on `http://localhost:3000`.
-The browser client runs on `http://localhost:5173`.
+The auth server listens on `http://localhost:3000`, mounts Aurelian at `/auth`, and serves the browser client from `http://localhost:5173`.
 
 Use `pnpm --filter aurelian-examples start` to run only the auth server without watch mode.
 
-## Environment
+## Sign in
 
-Google OAuth is optional. Set these before using the Google button:
+Use the local request provider credentials:
 
-```sh
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
+```text
+Email: demo@example.com
+Password: password
 ```
 
 ## Client Flows
 
-- Google uses `authClient.authorize({ pkce: true })`, stores the verifier in `localStorage`, then exchanges the callback code with `authClient.exchange(...)`.
-- Password submits directly from the browser to `POST /auth/password/callback`.
-- Email code submits directly from the browser to `POST /auth/code/authorize`, then verifies with `POST /auth/code/callback`.
+- Password authentication uses `authClient.authenticate('password', body)` and posts to `/auth/authenticate/password`.
 - Token verification uses `authClient.verify(accessToken)` in the browser.
 
-Password and code UIs live on the client. Providers only send/verify credentials through provider endpoints.
+The example generates an ephemeral ES256 key pair and uses process-local storage on startup. The docs quick start loads stable PEM files and explains the production storage requirements.

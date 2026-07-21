@@ -1,0 +1,255 @@
+import type { StandardSchemaV1 } from '@standard-schema/spec';
+import { exportPKCS8, exportSPKI, generateKeyPair } from 'jose';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { createAuth } from './server.js';
+import { createPKCEChallenge } from './client.js';
+import { defineProfiles } from './profiles.js';
+import { memoryStorage } from './storage/memory.js';
+import type { TokenResponse } from './types.js';
+
+const ISSUER = 'https://auth.example.com/auth';
+const REDIRECT_URI = 'https://app.example.com/callback';
+
+const UserSchema: StandardSchemaV1<
+  unknown,
+  { id: string; refreshed?: boolean }
+> = {
+  '~standard': {
+    validate(value) {
+      if (
+        typeof value === 'object' &&
+        value !== null &&
+        'id' in value &&
+        typeof value.id === 'string'
+      ) {
+        return {
+          value: {
+            id: value.id,
+            refreshed:
+              'refreshed' in value && value.refreshed === true
+                ? true
+                : undefined,
+          },
+        };
+      }
+
+      return { issues: [{ message: 'id is required' }] };
+    },
+    vendor: 'aurelian-test',
+    version: 1,
+  },
+};
+const profiles = defineProfiles({ user: UserSchema });
+let privateKey: string;
+let publicKey: string;
+
+beforeAll(async () => {
+  const keyPair = await generateKeyPair('ES256', { extractable: true });
+
+  [privateKey, publicKey] = await Promise.all([
+    exportPKCS8(keyPair.privateKey),
+    exportSPKI(keyPair.publicKey),
+  ]);
+});
+
+describe('createAuth', () => {
+  it('issues, rotates, verifies, and revokes an application-owned session', async () => {
+    const auth = createAuth({
+      resolve({ profile, response }) {
+        return profile('user', { id: response.data.id });
+      },
+      issuer: ISSUER,
+      profiles,
+      providers: {
+        password: {
+          async authenticate({ request }) {
+            const body: {
+              email?: unknown;
+              password?: unknown;
+            } = await request.json();
+
+            if (
+              body.email !== 'user@example.com' ||
+              body.password !== 'password'
+            ) {
+              return null;
+            }
+
+            return {
+              email: body.email,
+              emailVerified: true,
+              id: 'user_123',
+            };
+          },
+          type: 'request',
+        },
+      },
+      refresh: {
+        resolve({ profile }) {
+          return {
+            ...profile,
+            properties: { ...profile.properties, refreshed: true },
+          };
+        },
+      },
+      signing: { algorithm: 'ES256', privateKey, publicKey },
+      storage: memoryStorage(),
+    });
+    const authentication = await auth.handler(
+      jsonRequest(`${ISSUER}/authenticate/password`, {
+        email: 'user@example.com',
+        password: 'password',
+      }),
+    );
+    const tokens = await readTokenResponse(authentication);
+    const verification = await auth.verify(tokens.accessToken);
+
+    expect(authentication.status).toBe(200);
+    expect(verification.valid).toBe(true);
+
+    if (verification.valid) {
+      expect(verification.profile).toEqual({
+        properties: { id: 'user_123' },
+        type: 'user',
+      });
+      expect(verification.claims.sub).toBe('user_123');
+    }
+
+    const rotated = await auth.refresh({ refreshToken: tokens.refreshToken });
+
+    expect(rotated).not.toBeNull();
+    expect(
+      await auth.refresh({ refreshToken: tokens.refreshToken }),
+    ).toBeNull();
+
+    if (!rotated) {
+      throw new Error('refresh_failed');
+    }
+
+    const rotatedVerification = await auth.verify(rotated.accessToken);
+
+    expect(rotatedVerification.valid).toBe(true);
+
+    if (rotatedVerification.valid) {
+      expect(rotatedVerification.profile).toEqual({
+        properties: { id: 'user_123', refreshed: true },
+        type: 'user',
+      });
+    }
+
+    await auth.revoke({ refreshToken: rotated.refreshToken });
+
+    expect(
+      await auth.refresh({ refreshToken: rotated.refreshToken }),
+    ).toBeNull();
+  });
+
+  it('exchanges an OAuth callback with isolated state and PKCE', async () => {
+    const auth = createAuth({
+      resolve({ profile, response }) {
+        return profile('user', { id: response.data.id });
+      },
+      issuer: ISSUER,
+      profiles,
+      providers: {
+        example: {
+          authorizationUrl({ callbackURL, state }) {
+            const url = new URL('https://provider.example.com/authorize');
+
+            url.searchParams.set('redirect_uri', callbackURL);
+            url.searchParams.set('state', state);
+
+            return url;
+          },
+          callback() {
+            return { id: 'oauth_user' };
+          },
+          type: 'oauth',
+        },
+      },
+      redirectURIs: [REDIRECT_URI],
+      signing: { algorithm: 'ES256', privateKey, publicKey },
+      storage: memoryStorage(),
+    });
+    const pkce = await createPKCEChallenge();
+    const authorizeURL = new URL(`${ISSUER}/authorize/example`);
+
+    authorizeURL.searchParams.set('redirect_uri', REDIRECT_URI);
+    authorizeURL.searchParams.set('state', 'client_state');
+
+    const unprotectedAuthorization = await auth.handler(
+      new Request(authorizeURL),
+    );
+
+    expect(unprotectedAuthorization.status).toBe(400);
+
+    authorizeURL.searchParams.set('code_challenge', pkce.challenge);
+    authorizeURL.searchParams.set('code_challenge_method', 'S256');
+
+    const authorization = await auth.handler(new Request(authorizeURL));
+    const providerRedirect = new URL(getLocation(authorization));
+    const providerState = providerRedirect.searchParams.get('state');
+
+    expect(authorization.status).toBe(302);
+    expect(providerRedirect.searchParams.get('redirect_uri')).toBe(
+      `${ISSUER}/callback/example`,
+    );
+    expect(providerState).not.toBe('client_state');
+
+    if (!providerState) {
+      throw new Error('provider_state_missing');
+    }
+
+    const callbackURL = new URL(`${ISSUER}/callback/example`);
+
+    callbackURL.searchParams.set('code', 'provider_code');
+    callbackURL.searchParams.set('state', providerState);
+
+    const callback = await auth.handler(new Request(callbackURL));
+    const clientRedirect = new URL(getLocation(callback));
+    const authorizationCode = clientRedirect.searchParams.get('code');
+
+    expect(callback.status).toBe(302);
+    expect(clientRedirect.origin + clientRedirect.pathname).toBe(REDIRECT_URI);
+    expect(clientRedirect.searchParams.get('state')).toBe('client_state');
+
+    if (!authorizationCode) {
+      throw new Error('authorization_code_missing');
+    }
+
+    const exchange = await auth.handler(
+      jsonRequest(`${ISSUER}/token`, {
+        code: authorizationCode,
+        codeVerifier: pkce.verifier,
+        redirectURI: REDIRECT_URI,
+      }),
+    );
+    const tokens = await readTokenResponse(exchange);
+    const verification = await auth.verify(tokens.accessToken);
+
+    expect(exchange.status).toBe(200);
+    expect(verification.valid).toBe(true);
+  });
+});
+
+function jsonRequest(url: string, body: unknown): Request {
+  return new Request(url, {
+    body: JSON.stringify(body),
+    headers: { 'content-type': 'application/json' },
+    method: 'POST',
+  });
+}
+
+async function readTokenResponse(response: Response): Promise<TokenResponse> {
+  return response.json();
+}
+
+function getLocation(response: Response): string {
+  const location = response.headers.get('location');
+
+  if (!location) {
+    throw new Error('location_missing');
+  }
+
+  return location;
+}

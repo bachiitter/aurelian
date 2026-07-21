@@ -1,0 +1,6 @@
+.astro/
+.blume/
+.blume-verify/
+.turbo/
+dist/
+.blume-verify/

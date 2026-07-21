@@ -1,53 +1,126 @@
-import type { logger } from "hono/logger";
-import type { Provider } from "./providers/types";
-import type { ProfilePayload, ProfileSchema } from "./profiles";
-import type { StorageAdapter } from "./storage/storage";
+import type { JWK, JWTPayload } from 'jose';
+import type {
+  ProfilePayload,
+  ProfileResolver,
+  ProfileSchema,
+  ProviderIdentity,
+} from './profiles.js';
+import type { StorageAdapter } from './storage/types.js';
 
-export type Prettify<T> = {
-  [K in keyof T]: T[K];
+export type { ProviderIdentity } from './profiles.js';
+
+export type MaybePromise<Value> = Value | Promise<Value>;
+
+export type OAuthProvider = {
+  authorizationUrl(input: {
+    callbackURL: string;
+    request: Request;
+    scopes?: string[];
+    state: string;
+  }): MaybePromise<URL>;
+  callback(input: {
+    callbackURL: string;
+    code: string;
+    request: Request;
+    state: string;
+  }): MaybePromise<ProviderIdentity>;
+  type: 'oauth';
 };
 
-export interface OnSuccessResponder<
-  T extends { type: string; properties: any },
-> {
-  profile<Type extends T["type"]>(
-    type: Type,
-    properties: Extract<T, { type: Type }>["properties"],
-    opts?: {
-      ttl?: {
-        access?: number;
-        refresh?: number;
-      };
-      profile?: string;
-    },
-  ): Promise<Response>;
-}
+export type RequestProvider = {
+  authenticate(input: {
+    request: Request;
+  }): MaybePromise<ProviderIdentity | null>;
+  type: 'request';
+};
+
+export type Provider = OAuthProvider | RequestProvider;
+
+export type Session<Profile> = {
+  createdAt: number;
+  expiresAt: number;
+  id: string;
+  profile: Profile;
+  provider: string;
+};
+
+export type TokenResponse = {
+  accessToken: string;
+  expiresIn: number;
+  refreshToken: string;
+  tokenType: 'Bearer';
+};
+
+export type AccessTokenClaims<Profile> = JWTPayload & {
+  profile: Profile;
+  sid: string;
+  typ: 'access';
+};
+
+export type VerifyResult<Profile> =
+  | {
+      claims: AccessTokenClaims<Profile>;
+      profile: Profile;
+      valid: true;
+    }
+  | {
+      reason: 'token_invalid';
+      valid: false;
+    };
 
 export type CreateAuthOptions<
   Providers extends Record<string, Provider>,
   Profiles extends ProfileSchema,
-  Result = {
-    [key in keyof Providers]: Prettify<{
-      provider: key & (Providers[key] extends Provider<infer T> ? T : {});
-    }>;
-  }[keyof Providers],
 > = {
-  logger?: boolean | Parameters<typeof logger>[0];
-  debug?: boolean;
+  access?: {
+    audience?: string | string[];
+    claims?(input: {
+      profile: ProfilePayload<Profiles>;
+      session: Session<ProfilePayload<Profiles>>;
+    }): MaybePromise<Record<string, unknown>>;
+    ttl?: number;
+  };
+  issuer: string;
+  onError?(error: unknown, context: {
+    request: Request;
+    requestId: string;
+  }): MaybePromise<void>;
   profiles: Profiles;
   providers: Providers;
+  redirectURIs?:
+    | readonly string[]
+    | ((redirectURI: string, request: Request) => MaybePromise<boolean>);
+  refresh?: {
+    resolve?(input: {
+      profile: ProfilePayload<Profiles>;
+      provider: string;
+      request?: Request;
+    }): MaybePromise<ProfilePayload<Profiles> | null>;
+    ttl?: number;
+  };
+  resolve: ProfileResolver<Providers, Profiles>;
   signing: {
+    algorithm?: string;
+    keyId?: string;
     privateKey: string;
     publicKey: string;
   };
-  storage?: StorageAdapter;
-  ttl: {
-    access?: number;
-    refresh?: number;
-  };
-  callback(
-    response: OnSuccessResponder<ProfilePayload<Profiles>>,
-    input: Result,
-    req: Request,
-  ): Promise<any>;
+  storage: StorageAdapter;
+};
+
+export type IssueInput<Profile> = {
+  profile: Profile;
+  provider: string;
+};
+
+export type Auth<Profile> = {
+  handler(request: Request): Promise<Response>;
+  issue(input: IssueInput<Profile>): Promise<TokenResponse>;
+  jwks(): Promise<{ keys: JWK[] }>;
+  refresh(input: {
+    refreshToken: string;
+    request?: Request;
+  }): Promise<TokenResponse | null>;
+  revoke(input: { refreshToken: string }): Promise<void>;
+  verify(accessToken: string): Promise<VerifyResult<Profile>>;
 };

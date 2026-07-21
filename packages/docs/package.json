@@ -1,0 +1,19 @@
+{
+  "name": "aurelian-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "blume build",
+    "dev": "blume dev",
+    "preview": "blume preview",
+    "typecheck": "blume check",
+    "validate": "blume validate"
+  },
+  "dependencies": {
+    "blume": "0.8.0"
+  },
+  "devDependencies": {
+    "astro": "^7.0.7",
+    "typescript": "catalog:"
+  }
+}
