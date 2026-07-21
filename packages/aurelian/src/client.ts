@@ -1,27 +1,26 @@
-import { createRemoteJWKSet, jwtVerify } from 'jose';
-import type { JWTPayload } from 'jose';
-
-export type IdentityProfile<
-  Type extends string = string,
-  Properties extends Record<string, unknown> = Record<string, unknown>,
-> = {
-  properties: Properties;
-  type: Type;
-};
+import { createRemoteJWKSet, customFetch, jwtVerify } from 'jose';
+import { createHash, createRandomString } from './crypto.js';
+import type { AccessTokenClaims, TokenResponse, VerifyResult } from './types.js';
 
 export type CreateClientOptions = {
-  audience?: string;
-  clientID?: string;
+  audience?: string | string[];
   fetch?: typeof fetch;
   issuer: string;
+  redirectURI?: string;
+  storage?: OAuthStorage;
 };
 
 export type AuthorizeOptions = {
-  pkce?: boolean;
   provider: string;
-  redirectURI: string;
+  redirectURI?: string;
   scopes?: string[];
   state?: string;
+};
+
+export type OAuthStorage = {
+  getItem(key: string): string | null;
+  removeItem(key: string): void;
+  setItem(key: string, value: string): void;
 };
 
 export type PKCEChallenge = {
@@ -31,53 +30,120 @@ export type PKCEChallenge = {
 };
 
 export type AuthorizeResult = {
-  challenge?: PKCEChallenge;
+  challenge: PKCEChallenge;
   state: string;
   url: URL;
 };
 
-export type TokenResponse = {
-  accessToken: string;
-  expiresIn: number;
-  refreshToken: string;
-  tokenType: 'Bearer';
-};
+export type { TokenResponse, VerifyResult };
 
-export type VerifyResult<Profile extends IdentityProfile = IdentityProfile> =
-  | { claims: JWTPayload; profile: Profile; valid: true }
-  | { reason: string; valid: false };
-
-export function createClient<Profile extends IdentityProfile = IdentityProfile>(options: CreateClientOptions) {
+export function createClient<Profile = unknown>(options: CreateClientOptions) {
   const issuer = options.issuer.replace(/\/$/, '');
-  const jwks = createRemoteJWKSet(new URL(`${issuer}/.well-known/jwks.json`));
-  const request = options.fetch ?? fetch;
+  const request = options.fetch ?? globalThis.fetch;
+  const transactionPrefix = `aurelian:${issuer}:oauth`;
+  const jwks = createRemoteJWKSet(
+    new URL(`${issuer}/.well-known/jwks.json`),
+    options.fetch ? { [customFetch]: options.fetch } : undefined,
+  );
 
   return {
+    async authenticate<Body>(
+      provider: string,
+      body: Body,
+    ): Promise<TokenResponse> {
+      return postToken(request, `${issuer}/authenticate/${provider}`, body);
+    },
     async authorize(input: AuthorizeOptions): Promise<AuthorizeResult> {
-      const state = input.state ?? generateRandomString(32);
-      const url = new URL(`${issuer}/${input.provider}/authorize`);
-      const challenge = input.pkce ? await createPKCEChallenge() : undefined;
+      const state = input.state ?? createRandomString(32);
+      const url = new URL(`${issuer}/authorize/${input.provider}`);
+      const challenge = await createPKCEChallenge();
+      const redirectURI = input.redirectURI ?? options.redirectURI;
+      const storage = options.storage ?? globalThis.sessionStorage;
 
-      url.searchParams.set('redirect_uri', input.redirectURI);
-      url.searchParams.set('state', state);
-
-      if (options.clientID) {
-        url.searchParams.set('client_id', options.clientID);
+      if (!redirectURI) {
+        throw new Error('oauth_redirect_uri_required');
       }
 
-      if (input.scopes && input.scopes.length > 0) {
+      if (!storage) {
+        throw new Error('oauth_storage_required');
+      }
+
+      const transactionKey = `${transactionPrefix}:${state}`;
+
+      if (
+        storage.getItem(`${transactionKey}:verifier`) !== null ||
+        storage.getItem(`${transactionKey}:redirect-uri`) !== null
+      ) {
+        throw new Error('oauth_state_in_use');
+      }
+
+      storage.setItem(`${transactionKey}:verifier`, challenge.verifier);
+      storage.setItem(`${transactionKey}:redirect-uri`, redirectURI);
+
+      url.searchParams.set('redirect_uri', redirectURI);
+      url.searchParams.set('state', state);
+
+      if (input.scopes?.length) {
         url.searchParams.set('scope', input.scopes.join(' '));
       }
 
-      if (challenge) {
-        url.searchParams.set('code_challenge', challenge.challenge);
-        url.searchParams.set('code_challenge_method', challenge.method);
-      }
+      url.searchParams.set('code_challenge', challenge.challenge);
+      url.searchParams.set('code_challenge_method', challenge.method);
 
       return { challenge, state, url };
     },
-    async exchange(input: { code: string; codeVerifier?: string; redirectURI: string }): Promise<TokenResponse> {
+    async exchange(input: {
+      code: string;
+      codeVerifier?: string;
+      redirectURI: string;
+    }): Promise<TokenResponse> {
       return postToken(request, `${issuer}/token`, input);
+    },
+    async handleCallback(input?: {
+      url?: string | URL;
+    }): Promise<TokenResponse> {
+      const callbackURL = input?.url
+        ? new URL(input.url)
+        : typeof globalThis.location === 'undefined'
+          ? null
+          : new URL(globalThis.location.href);
+      const storage = options.storage ?? globalThis.sessionStorage;
+      const code = callbackURL?.searchParams.get('code');
+      const state = callbackURL?.searchParams.get('state');
+      const providerError = callbackURL?.searchParams.get('error');
+
+      if (!storage) {
+        throw new Error('oauth_storage_required');
+      }
+
+      if (!state) {
+        throw new Error('oauth_callback_invalid');
+      }
+
+      const transactionKey = `${transactionPrefix}:${state}`;
+      const codeVerifier = storage.getItem(`${transactionKey}:verifier`);
+      const redirectURI = storage.getItem(`${transactionKey}:redirect-uri`);
+
+      if (!codeVerifier || !redirectURI) {
+        throw new Error('oauth_state_invalid');
+      }
+
+      storage.removeItem(`${transactionKey}:verifier`);
+      storage.removeItem(`${transactionKey}:redirect-uri`);
+
+      if (providerError) {
+        throw new Error('oauth_provider_error');
+      }
+
+      if (!code) {
+        throw new Error('oauth_callback_invalid');
+      }
+
+      return postToken(request, `${issuer}/token`, {
+        code,
+        codeVerifier,
+        redirectURI,
+      });
     },
     async refresh(input: { refreshToken: string }): Promise<TokenResponse> {
       return postToken(request, `${issuer}/token/refresh`, input);
@@ -85,9 +151,7 @@ export function createClient<Profile extends IdentityProfile = IdentityProfile>(
     async revoke(input: { refreshToken: string }): Promise<void> {
       const response = await request(`${issuer}/token/revoke`, {
         body: JSON.stringify(input),
-        headers: {
-          'content-type': 'application/json',
-        },
+        headers: { 'content-type': 'application/json' },
         method: 'POST',
       });
 
@@ -101,13 +165,27 @@ export function createClient<Profile extends IdentityProfile = IdentityProfile>(
           audience: options.audience,
           issuer,
         });
-        const profile = result.payload.profile;
-
-        if (!isIdentityProfile(profile)) {
-          return { reason: 'profile_invalid', valid: false };
+        if (
+          result.payload.typ !== 'access' ||
+          typeof result.payload.sid !== 'string' ||
+          result.payload.profile === undefined
+        ) {
+          return { reason: 'token_invalid', valid: false };
         }
 
-        return { claims: result.payload, profile: profile as Profile, valid: true };
+        const profile = result.payload.profile as Profile;
+        const claims: AccessTokenClaims<Profile> = {
+          ...result.payload,
+          profile,
+          sid: result.payload.sid,
+          typ: result.payload.typ,
+        };
+
+        return {
+          claims,
+          profile,
+          valid: true,
+        };
       } catch {
         return { reason: 'token_invalid', valid: false };
       }
@@ -116,22 +194,23 @@ export function createClient<Profile extends IdentityProfile = IdentityProfile>(
 }
 
 export async function createPKCEChallenge(): Promise<PKCEChallenge> {
-  const verifier = generateRandomString(64);
-  const challenge = await sha256Base64Url(verifier);
+  const verifier = createRandomString(64);
 
   return {
-    challenge,
+    challenge: await createHash(verifier),
     method: 'S256',
     verifier,
   };
 }
 
-async function postToken(request: typeof fetch, url: string, body: unknown): Promise<TokenResponse> {
+async function postToken(
+  request: typeof fetch,
+  url: string,
+  body: unknown,
+): Promise<TokenResponse> {
   const response = await request(url, {
     body: JSON.stringify(body),
-    headers: {
-      'content-type': 'application/json',
-    },
+    headers: { 'content-type': 'application/json' },
     method: 'POST',
   });
 
@@ -139,63 +218,27 @@ async function postToken(request: typeof fetch, url: string, body: unknown): Pro
     throw new Error('token_request_failed');
   }
 
-  const json = await response.json();
+  const value: unknown = await response.json();
 
-  if (!isTokenResponse(json)) {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('accessToken' in value) ||
+    typeof value.accessToken !== 'string' ||
+    !('expiresIn' in value) ||
+    typeof value.expiresIn !== 'number' ||
+    !('refreshToken' in value) ||
+    typeof value.refreshToken !== 'string' ||
+    !('tokenType' in value) ||
+    value.tokenType !== 'Bearer'
+  ) {
     throw new Error('token_response_invalid');
   }
 
-  return json;
-}
-
-function isIdentityProfile(value: unknown): value is IdentityProfile {
-  if (!isRecord(value) || typeof value.type !== 'string' || !isRecord(value.properties)) {
-    return false;
-  }
-
-  return true;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isTokenResponse(value: unknown): value is TokenResponse {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  return typeof value.accessToken === 'string'
-    && typeof value.expiresIn === 'number'
-    && typeof value.refreshToken === 'string'
-    && value.tokenType === 'Bearer';
-}
-
-function generateRandomString(length: number): string {
-  const requiredBytes = Math.ceil((length * 3) / 4);
-  const buffer = new Uint8Array(requiredBytes);
-
-  globalThis.crypto.getRandomValues(buffer);
-
-  return base64UrlEncode(buffer).slice(0, length);
-}
-
-async function sha256Base64Url(value: string): Promise<string> {
-  const bytes = new TextEncoder().encode(value);
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
-
-  return base64UrlEncode(new Uint8Array(digest));
-}
-
-function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = '';
-
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-
-  return btoa(binary)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
+  return {
+    accessToken: value.accessToken,
+    expiresIn: value.expiresIn,
+    refreshToken: value.refreshToken,
+    tokenType: value.tokenType,
+  };
 }

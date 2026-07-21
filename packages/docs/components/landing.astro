@@ -1,0 +1,227 @@
+---
+import Badge from 'blume/components/content/Badge.astro';
+import Card from 'blume/components/content/Card.astro';
+import CodeBlock from 'blume/components/content/CodeBlock.astro';
+
+interface Capability {
+  description: string;
+  title: string;
+}
+
+interface FlowStep {
+  description: string;
+  title: string;
+}
+
+interface ReferencePath {
+  description: string;
+  href: string;
+  title: string;
+}
+
+const flowSteps = [
+  {
+    description: 'Credentials or an OAuth response enter the standard web handler.',
+    title: 'Request',
+  },
+  {
+    description: 'Provider code verifies the proof and returns a normalized identity.',
+    title: 'Provider',
+  },
+  {
+    description: 'Application code loads current data and returns a typed profile.',
+    title: 'Resolver',
+  },
+  {
+    description: 'Aurelian validates the profile, signs access, and stores refresh state.',
+    title: 'Session',
+  },
+] as const satisfies readonly FlowStep[];
+
+const referencePaths = [
+  {
+    description: 'Understand providers, profiles, resolvers, tokens, and storage.',
+    href: '/architecture',
+    title: 'Core concepts',
+  },
+  {
+    description: 'Review replay protection, session expiry, and authorization checks.',
+    href: '/security',
+    title: 'Security',
+  },
+  {
+    description: 'Find public exports, methods, routes, types, and error shapes.',
+    href: '/api',
+    title: 'API reference',
+  },
+] as const satisfies readonly ReferencePath[];
+
+const capabilities = [
+  {
+    description: 'Run direct request authentication or redirect-based OAuth.',
+    title: 'Provider flows',
+  },
+  {
+    description: 'Validate discriminated profiles with any Standard Schema validator.',
+    title: 'Typed profiles',
+  },
+  {
+    description: 'Issue signed JWTs and publish the corresponding public JWK.',
+    title: 'Access tokens',
+  },
+  {
+    description: 'Rotate opaque refresh tokens within a fixed session lifetime.',
+    title: 'Refresh sessions',
+  },
+  {
+    description: 'Store expiring records and consume one-time values atomically.',
+    title: 'Storage contract',
+  },
+  {
+    description: 'Mount a standard Request-to-Response handler in your server.',
+    title: 'Web API handler',
+  },
+] as const satisfies readonly Capability[];
+---
+
+<div class="mx-auto max-w-5xl px-6">
+  <section class="grid gap-10 py-16 sm:py-24 lg:grid-cols-[minmax(0,3fr)_minmax(17rem,2fr)] lg:items-end" aria-labelledby="landing-heading">
+    <div>
+      <Badge stroke>Runtime neutral</Badge>
+      <h1 id="landing-heading" class="mt-5 max-w-3xl text-balance font-medium text-4xl leading-tight tracking-tight sm:text-5xl">
+        Authentication for applications that manage their own users.
+      </h1>
+      <p class="mt-6 max-w-2xl text-balance text-lg text-muted-foreground leading-relaxed">
+        Aurelian handles provider flows, signed access tokens, refresh sessions, and protocol state. Your application keeps user records, permissions, workspace membership, and account policy.
+      </p>
+      <div class="mt-8 flex flex-wrap gap-3" aria-label="Get started">
+        <a class="inline-flex items-center rounded-blume bg-accent px-4 py-2.5 font-medium text-accent-foreground text-sm transition-opacity hover:opacity-90" href="/quickstart">
+          Open Quickstart
+        </a>
+        <a class="inline-flex items-center rounded-blume border border-border bg-background px-4 py-2.5 font-medium text-foreground text-sm transition-colors hover:bg-muted" href="#start-here">
+          Browse documentation
+        </a>
+      </div>
+    </div>
+
+    <aside class="rounded-blume border border-border bg-muted/40 p-5" aria-label="Installation and runtime details">
+      <div class="flex items-center justify-between gap-4">
+        <p class="font-medium text-sm">Install</p>
+        <a class="text-accent text-sm hover:underline" href="/setup">Setup →</a>
+      </div>
+      <CodeBlock code="pnpm add aurelian zod" lang="bash" title="Terminal" />
+      <dl class="divide-y divide-border border-y border-border text-sm">
+        <div class="grid grid-cols-[5.5rem_1fr] gap-3 py-3">
+          <dt class="text-muted-foreground">Runtime</dt>
+          <dd>ESM and standard web APIs</dd>
+        </div>
+        <div class="grid grid-cols-[5.5rem_1fr] gap-3 py-3">
+          <dt class="text-muted-foreground">Handler</dt>
+          <dd><code class="font-mono text-xs">Request → Promise&lt;Response&gt;</code></dd>
+        </div>
+      </dl>
+      <p class="mt-4 text-muted-foreground text-sm leading-relaxed">
+        Aurelian runs in JavaScript server environments that provide standard web APIs.
+      </p>
+    </aside>
+  </section>
+
+  <section class="border-border border-t py-16 sm:py-20" aria-labelledby="flow-heading">
+    <div class="grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)] sm:items-end">
+      <div>
+        <p class="font-medium text-accent text-sm">How it works</p>
+        <h2 id="flow-heading" class="mt-2 text-balance font-medium text-3xl tracking-tight">Follow an authentication request</h2>
+      </div>
+      <p class="text-muted-foreground text-sm leading-relaxed">
+        Each step has one responsibility, from incoming proof to a renewable session.
+      </p>
+    </div>
+
+    <ol class="mt-10 grid overflow-hidden rounded-blume border border-border bg-background divide-y divide-border lg:grid-cols-4 lg:divide-x lg:divide-y-0" aria-label="Authentication request flow">
+      {
+        flowSteps.map((step, index) => (
+          <li class="relative p-5">
+            <div class="flex items-center justify-between gap-3">
+              <span class="font-mono text-accent text-xs">{String(index + 1).padStart(2, '0')}</span>
+              {index < flowSteps.length - 1 && <span class="text-muted-foreground" aria-hidden="true">→</span>}
+            </div>
+            <h3 class="mt-6 font-medium text-base">{step.title}</h3>
+            <p class="mt-2 text-muted-foreground text-sm leading-relaxed">{step.description}</p>
+          </li>
+        ))
+      }
+    </ol>
+  </section>
+
+  <section class="border-border border-t py-16 sm:py-20" id="start-here" aria-labelledby="start-heading">
+    <div class="grid gap-10 lg:grid-cols-[minmax(14rem,1fr)_minmax(0,2fr)]">
+      <div>
+        <p class="font-medium text-accent text-sm">Start here</p>
+        <h2 id="start-heading" class="mt-2 font-medium text-3xl tracking-tight">Choose the right guide</h2>
+        <p class="mt-4 text-muted-foreground text-sm leading-relaxed">
+          Follow the complete sign-in flow first, then adapt the service to your runtime.
+        </p>
+      </div>
+
+      <div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <Card cta="Build the example" href="/quickstart" title="Quickstart" type="tip">
+            Configure Google sign-in and follow the authentication flow end to end.
+          </Card>
+          <Card cta="Configure the service" href="/setup" title="Setup">
+            Install Aurelian, create signing keys, and connect profiles, providers, and storage.
+          </Card>
+        </div>
+
+        <nav class="mt-6" aria-label="Documentation paths">
+          <ul class="divide-y divide-border border-y border-border">
+            {
+              referencePaths.map((path) => (
+                <li>
+                  <a class="group grid gap-1 py-4 text-foreground no-underline transition-colors hover:text-accent sm:grid-cols-[9rem_1fr_auto] sm:items-center sm:gap-4" href={path.href}>
+                    <span class="font-medium text-sm">{path.title}</span>
+                    <span class="text-muted-foreground text-sm leading-relaxed">{path.description}</span>
+                    <span class="text-accent transition-transform group-hover:translate-x-0.5" aria-hidden="true">→</span>
+                  </a>
+                </li>
+              ))
+            }
+          </ul>
+        </nav>
+      </div>
+    </div>
+  </section>
+
+  <section class="border-border border-t py-16 sm:py-20" aria-labelledby="capability-heading">
+    <div class="grid gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(17rem,1fr)]">
+      <div>
+        <p class="font-medium text-accent text-sm">Core capabilities</p>
+        <h2 id="capability-heading" class="mt-2 font-medium text-3xl tracking-tight">Use the built-in protocol controls</h2>
+        <ul class="mt-8 grid border-border border-t sm:grid-cols-2">
+          {
+            capabilities.map((capability) => (
+              <li class="border-border border-b py-5 sm:odd:pr-6 sm:even:border-l sm:even:pl-6">
+                <h3 class="font-medium text-sm">{capability.title}</h3>
+                <p class="mt-2 text-muted-foreground text-sm leading-relaxed">{capability.description}</p>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+
+      <aside aria-labelledby="security-heading">
+        <h3 id="security-heading" class="mb-3 font-medium text-accent text-sm">Security</h3>
+        <Card href="/security" title="Protect one-time state" type="tip" cta="Read the security guide">
+          <p>
+            OAuth state, authorization codes, and refresh tokens depend on atomic consumption to prevent replay.
+          </p>
+          <ul class="mt-4 list-disc space-y-2 pl-4">
+            <li>Require exact redirect URIs and S256 PKCE.</li>
+            <li>Keep refresh sessions on their original absolute expiry.</li>
+            <li>Recheck mutable authorization data during refresh.</li>
+          </ul>
+        </Card>
+      </aside>
+    </div>
+  </section>
+</div>

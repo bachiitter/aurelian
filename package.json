@@ -1,25 +1,26 @@
 {
-  "name": "aurelian",
-  "type": "module",
+  "name": "aurelian-workspace",
   "version": "0.0.0",
+  "private": true,
   "description": "Just another auth library.",
-  "author": "Bachitter Chahal <hello@bachitter.dev>",
-  "license": "MIT",
   "homepage": "https://github.com/bachiitter/aurelian#readme",
+  "bugs": {
+    "url": "https://github.com/bachiitter/aurelian/issues"
+  },
+  "license": "MIT",
+  "author": "Bachitter Chahal <hello@bachitter.dev>",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bachiitter/aurelian.git"
   },
-  "bugs": {
-    "url": "https://github.com/bachiitter/aurelian/issues"
-  },
-  "packageManager": "pnpm@11.0.0",
+  "type": "module",
   "scripts": {
     "dev": "turbo run dev",
     "dev:examples": "turbo run dev --filter=aurelian-examples",
     "build": "turbo run build"
   },
   "devDependencies": {
-    "turbo": "^2.9.12"
-  }
+    "turbo": "^2.10.4"
+  },
+  "packageManager": "pnpm@11.0.0"
 }

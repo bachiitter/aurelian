@@ -14,49 +14,37 @@
     "url": "https://github.com/bachiitter/aurelian/issues"
   },
   "exports": {
+    ".": "./dist/index.mjs",
     "./client": "./dist/client.mjs",
-    "./providers": "./dist/providers/index.mjs",
-    "./providers/code": "./dist/providers/code.mjs",
+    "./profiles": "./dist/profiles.mjs",
     "./providers/google": "./dist/providers/google.mjs",
-    "./providers/oauth": "./dist/providers/oauth.mjs",
-    "./providers/oidc": "./dist/providers/oidc.mjs",
-    "./providers/password": "./dist/providers/password.mjs",
-    "./providers/types": "./dist/providers/types.mjs",
-    "./providers/utils": "./dist/providers/utils.mjs",
     "./server": "./dist/server.mjs",
     "./storage": "./dist/storage/index.mjs",
     "./storage/cloudflare-kv": "./dist/storage/cloudflare-kv.mjs",
     "./storage/memory": "./dist/storage/memory.mjs",
-    "./storage/redis": "./dist/storage/redis.mjs",
-    "./storage/types": "./dist/storage/types.mjs",
     "./package.json": "./package.json"
   },
   "files": [
     "dist"
   ],
+  "sideEffects": false,
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
-    "test": "vitest",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm run build"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "catalog:",
-    "@types/node": "^25.6.2",
-    "hono": "^4.12.18",
-    "tsdown": "^0.22.0",
+    "tsdown": "^0.22.5",
     "typescript": "catalog:",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "@standard-schema/spec": "^1.1.0",
     "jose": "^6.2.3"
-  },
-  "peerDependencies": {
-    "hono": "^4.12.18"
   }
 }
