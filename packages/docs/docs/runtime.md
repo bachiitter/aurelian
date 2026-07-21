@@ -61,4 +61,4 @@ Plan rotation around the access TTL or place a JWKS layer that serves overlappin
 
 Probe `GET /.well-known/jwks.json` beneath the issuer and confirm the returned key has the configured `alg`, `kid`, and `use: 'sig'`. Run one request-provider flow, one OAuth flow, refresh rotation, revocation, and adapter concurrency against the deployed environment.
 
-Log unexpected errors through `onError` with request IDs, but never log tokens or credentials. Review [Security](/security), [Storage](/storage), and [Testing](/testing) before launch.
+Log unexpected errors through `onError` with request IDs, but never log tokens or credentials. Review [Security](/security) and [Storage](/storage) before launch.

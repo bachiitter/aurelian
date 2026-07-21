@@ -1,227 +1,303 @@
 ---
 import Badge from 'blume/components/content/Badge.astro';
-import Card from 'blume/components/content/Card.astro';
 import CodeBlock from 'blume/components/content/CodeBlock.astro';
+import Icon from 'blume/components/Icon.astro';
 
-interface Capability {
-  description: string;
-  title: string;
-}
-
-interface FlowStep {
-  description: string;
-  title: string;
-}
-
-interface ReferencePath {
-  description: string;
-  href: string;
-  title: string;
-}
-
-const flowSteps = [
+const guarantees = [
   {
-    description: 'Credentials or an OAuth response enter the standard web handler.',
+    description: 'Provider state, authorization codes, and refresh tokens are consumed once.',
+    icon: 'shield-check',
+    number: '01',
+    title: 'Replay boundaries',
+  },
+  {
+    description: 'Short-lived access tokens rotate within one fixed refresh-session lifetime.',
+    icon: 'refresh-cw',
+    number: '02',
+    title: 'Bounded sessions',
+  },
+  {
+    description: 'Application data is resolved and validated before any profile is signed.',
+    icon: 'user-round-check',
+    number: '03',
+    title: 'Resolver first',
+  },
+] as const;
+
+const flow = [
+  {
+    code: 'authorize()',
+    description: 'The client creates state and an S256 verifier.',
+    icon: 'send',
     title: 'Request',
   },
   {
-    description: 'Provider code verifies the proof and returns a normalized identity.',
-    title: 'Provider',
+    code: 'callback()',
+    description: 'Configured provider code verifies external proof.',
+    icon: 'fingerprint',
+    title: 'Identity',
   },
   {
-    description: 'Application code loads current data and returns a typed profile.',
-    title: 'Resolver',
+    code: 'resolve()',
+    description: 'Application code loads the canonical profile.',
+    icon: 'user-round-cog',
+    title: 'Profile',
   },
   {
-    description: 'Aurelian validates the profile, signs access, and stores refresh state.',
+    code: 'exchange()',
+    description: 'Aurelian signs access and stores refresh state.',
+    icon: 'key-round',
     title: 'Session',
   },
-] as const satisfies readonly FlowStep[];
+] as const;
 
-const referencePaths = [
-  {
-    description: 'Understand providers, profiles, resolvers, tokens, and storage.',
-    href: '/architecture',
-    title: 'Core concepts',
-  },
-  {
-    description: 'Review replay protection, session expiry, and authorization checks.',
-    href: '/security',
-    title: 'Security',
-  },
-  {
-    description: 'Find public exports, methods, routes, types, and error shapes.',
-    href: '/api',
-    title: 'API reference',
-  },
-] as const satisfies readonly ReferencePath[];
+const configurationCode = `import { createAuth, defineProfiles } from 'aurelian'
+import { memoryStorage } from 'aurelian/storage/memory'
+import { z } from 'zod'
 
-const capabilities = [
-  {
-    description: 'Run direct request authentication or redirect-based OAuth.',
-    title: 'Provider flows',
+const profiles = defineProfiles({
+  user: z.object({ id: z.string(), role: z.string() })
+})
+
+export const auth = createAuth({
+  issuer: 'https://auth.example.com',
+  profiles,
+  providers,
+  resolve({ profile, response }) {
+    return profile('user', {
+      id: response.data.id,
+      role: 'member'
+    })
   },
-  {
-    description: 'Validate discriminated profiles with any Standard Schema validator.',
-    title: 'Typed profiles',
-  },
-  {
-    description: 'Issue signed JWTs and publish the corresponding public JWK.',
-    title: 'Access tokens',
-  },
-  {
-    description: 'Rotate opaque refresh tokens within a fixed session lifetime.',
-    title: 'Refresh sessions',
-  },
-  {
-    description: 'Store expiring records and consume one-time values atomically.',
-    title: 'Storage contract',
-  },
-  {
-    description: 'Mount a standard Request-to-Response handler in your server.',
-    title: 'Web API handler',
-  },
-] as const satisfies readonly Capability[];
+  signing,
+  storage: memoryStorage()
+})`;
 ---
 
-<div class="mx-auto max-w-5xl px-6">
-  <section class="grid gap-10 py-16 sm:py-24 lg:grid-cols-[minmax(0,3fr)_minmax(17rem,2fr)] lg:items-end" aria-labelledby="landing-heading">
-    <div>
-      <Badge stroke>Runtime neutral</Badge>
-      <h1 id="landing-heading" class="mt-5 max-w-3xl text-balance font-medium text-4xl leading-tight tracking-tight sm:text-5xl">
-        Authentication for applications that manage their own users.
-      </h1>
-      <p class="mt-6 max-w-2xl text-balance text-lg text-muted-foreground leading-relaxed">
-        Aurelian handles provider flows, signed access tokens, refresh sessions, and protocol state. Your application keeps user records, permissions, workspace membership, and account policy.
-      </p>
-      <div class="mt-8 flex flex-wrap gap-3" aria-label="Get started">
-        <a class="inline-flex items-center rounded-blume bg-accent px-4 py-2.5 font-medium text-accent-foreground text-sm transition-opacity hover:opacity-90" href="/quickstart">
-          Open Quickstart
-        </a>
-        <a class="inline-flex items-center rounded-blume border border-border bg-background px-4 py-2.5 font-medium text-foreground text-sm transition-colors hover:bg-muted" href="#start-here">
-          Browse documentation
-        </a>
+<main class="mx-auto max-w-6xl px-5 sm:px-6">
+  <section class="relative overflow-hidden border-border border-b py-16 sm:py-24 lg:py-28" aria-labelledby="landing-heading">
+    <div class="grid gap-12 lg:grid-cols-12 lg:items-end lg:gap-8">
+      <div class="lg:col-span-8">
+        <Badge stroke>Authentication infrastructure</Badge>
+        <h1 id="landing-heading" class="mt-7 max-w-5xl text-balance font-display text-5xl leading-[0.95] tracking-[-0.045em] sm:text-6xl lg:text-7xl">
+          Authentication infrastructure that stops before your user model.
+        </h1>
+        <p class="mt-7 max-w-2xl text-pretty text-lg text-muted-foreground leading-relaxed">
+          Aurelian handles identity proof, protocol state, signed access tokens, and refresh rotation. Your application remains the authority for users, permissions, and policy.
+        </p>
+        <div class="mt-9 flex flex-wrap gap-3">
+          <a class="inline-flex items-center gap-8 rounded-blume bg-accent px-5 py-3 font-medium text-accent-foreground text-sm no-underline transition-opacity hover:opacity-90 active:opacity-75" href="/quickstart">
+            Start building <Icon name="arrow-right" size={15} />
+          </a>
+          <a class="inline-flex items-center rounded-blume border border-border bg-background px-5 py-3 font-medium text-foreground text-sm no-underline transition-colors hover:bg-muted" href="/architecture">
+            Understand the boundary
+          </a>
+        </div>
       </div>
-    </div>
 
-    <aside class="rounded-blume border border-border bg-muted/40 p-5" aria-label="Installation and runtime details">
-      <div class="flex items-center justify-between gap-4">
-        <p class="font-medium text-sm">Install</p>
-        <a class="text-accent text-sm hover:underline" href="/setup">Setup →</a>
-      </div>
-      <CodeBlock code="pnpm add aurelian zod" lang="bash" title="Terminal" />
-      <dl class="divide-y divide-border border-y border-border text-sm">
-        <div class="grid grid-cols-[5.5rem_1fr] gap-3 py-3">
-          <dt class="text-muted-foreground">Runtime</dt>
-          <dd>ESM and standard web APIs</dd>
+      <aside class="overflow-hidden rounded-blume border border-border bg-code lg:col-span-4" aria-label="Authentication trace">
+        <div class="flex items-center justify-between border-border border-b px-4 py-3 font-mono text-[10px] text-muted-foreground uppercase tracking-wider">
+          <span class="flex items-center gap-2"><Icon name="route" size={13} /> Auth trace</span>
+          <span class="flex items-center gap-1.5 text-accent"><Icon name="circle-check" size={12} /> 200 verified</span>
         </div>
-        <div class="grid grid-cols-[5.5rem_1fr] gap-3 py-3">
-          <dt class="text-muted-foreground">Handler</dt>
-          <dd><code class="font-mono text-xs">Request → Promise&lt;Response&gt;</code></dd>
+        <div class="space-y-1 p-3">
+          <div class="grid grid-cols-[2rem_1fr_auto] items-center gap-3 rounded-blume bg-background px-3 py-3">
+            <Icon class="text-muted-foreground" name="radio-tower" size={16} />
+            <div><p class="font-mono text-xs">external proof</p><p class="mt-1 text-[11px] text-muted-foreground">untrusted input</p></div>
+            <span class="font-mono text-[10px] text-muted-foreground">IN</span>
+          </div>
+          <div class="grid grid-cols-[2rem_1fr_auto] items-center gap-3 rounded-blume bg-background px-3 py-3">
+            <Icon class="text-accent" name="fingerprint" size={16} />
+            <div><p class="font-mono text-xs">provider.verify()</p><p class="mt-1 text-[11px] text-muted-foreground">normalized identity</p></div>
+            <span class="font-mono text-[10px] text-accent">ID</span>
+          </div>
+          <div class="grid grid-cols-[2rem_1fr_auto] items-center gap-3 rounded-blume bg-background px-3 py-3">
+            <Icon class="text-accent" name="user-round-cog" size={16} />
+            <div><p class="font-mono text-xs">application.resolve()</p><p class="mt-1 text-[11px] text-muted-foreground">owned profile</p></div>
+            <span class="font-mono text-[10px] text-accent">APP</span>
+          </div>
+          <div class="grid grid-cols-[2rem_1fr_auto] items-center gap-3 rounded-blume bg-accent px-3 py-3 text-accent-foreground">
+            <Icon name="key-round" size={16} />
+            <div><p class="font-mono text-xs">session.issue()</p><p class="mt-1 text-[11px] opacity-70">access + refresh</p></div>
+            <span class="font-mono text-[10px]">OUT</span>
+          </div>
         </div>
-      </dl>
-      <p class="mt-4 text-muted-foreground text-sm leading-relaxed">
-        Aurelian runs in JavaScript server environments that provide standard web APIs.
-      </p>
-    </aside>
+        <div class="grid grid-cols-2 border-border border-t font-mono text-[10px] text-muted-foreground uppercase tracking-wider">
+          <span class="px-4 py-3">Atomic state</span>
+          <span class="border-border border-l px-4 py-3 text-right">Fixed expiry</span>
+        </div>
+      </aside>
+    </div>
   </section>
 
-  <section class="border-border border-t py-16 sm:py-20" aria-labelledby="flow-heading">
-    <div class="grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)] sm:items-end">
-      <div>
-        <p class="font-medium text-accent text-sm">How it works</p>
-        <h2 id="flow-heading" class="mt-2 text-balance font-medium text-3xl tracking-tight">Follow an authentication request</h2>
+  <section class="border-border border-b py-16 sm:py-20" aria-labelledby="configuration-heading">
+    <div class="grid gap-10 lg:grid-cols-12 lg:gap-8">
+      <div class="lg:col-span-4">
+        <p class="font-mono text-[11px] text-accent uppercase tracking-wider">01 / Configuration</p>
+        <h2 id="configuration-heading" class="mt-4 text-balance font-display text-4xl leading-tight tracking-tight sm:text-5xl">
+          Auth behavior lives in code.
+        </h2>
+        <p class="mt-6 text-muted-foreground leading-relaxed">
+          Configure providers, profiles, resolution, signing, and storage in one typed service. No hidden user model or dashboard-owned policy.
+        </p>
+        <dl class="mt-8 divide-y divide-border border-border border-y text-sm">
+          <div class="flex items-center justify-between py-4"><dt class="text-muted-foreground">Input</dt><dd>Verified identity</dd></div>
+          <div class="flex items-center justify-between py-4"><dt class="text-muted-foreground">Authority</dt><dd>Your resolver</dd></div>
+          <div class="flex items-center justify-between py-4"><dt class="text-muted-foreground">Output</dt><dd>Typed session</dd></div>
+        </dl>
+        <a class="mt-7 inline-flex items-center gap-3 text-accent text-sm hover:underline" href="/setup">Read configuration guide <Icon name="arrow-right" size={14} /></a>
       </div>
-      <p class="text-muted-foreground text-sm leading-relaxed">
-        Each step has one responsibility, from incoming proof to a renewable session.
-      </p>
+      <div class="min-w-0 lg:col-span-8">
+        <CodeBlock code={configurationCode} lang="ts" title="auth.ts" />
+        <div class="mt-3 grid gap-3 sm:grid-cols-3">
+          <div class="rounded-blume border border-border bg-muted p-4">
+            <Icon class="text-accent" name="blocks" size={18} />
+            <p class="mt-5 font-mono text-[10px] text-accent uppercase tracking-wider">Composable</p>
+            <p class="mt-2 text-muted-foreground text-xs leading-relaxed">Swap identity and storage implementations independently.</p>
+          </div>
+          <div class="rounded-blume border border-border bg-muted p-4">
+            <Icon class="text-accent" name="braces" size={18} />
+            <p class="mt-5 font-mono text-[10px] text-accent uppercase tracking-wider">Typed</p>
+            <p class="mt-2 text-muted-foreground text-xs leading-relaxed">Profiles remain discriminated from resolution through verification.</p>
+          </div>
+          <div class="rounded-blume border border-border bg-muted p-4">
+            <Icon class="text-accent" name="git-pull-request" size={18} />
+            <p class="mt-5 font-mono text-[10px] text-accent uppercase tracking-wider">Reviewable</p>
+            <p class="mt-2 text-muted-foreground text-xs leading-relaxed">Authentication policy changes with application code.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="border-border border-b py-16 sm:py-20" aria-labelledby="boundary-heading">
+    <div class="grid gap-10 lg:grid-cols-12 lg:gap-8">
+      <div class="lg:col-span-5">
+        <p class="font-mono text-[11px] text-accent uppercase tracking-wider">02 / Ownership boundary</p>
+        <h2 id="boundary-heading" class="mt-4 text-balance font-display text-4xl leading-tight tracking-tight sm:text-5xl">
+          Proof enters.<br />Your profile leaves.
+        </h2>
+        <p class="mt-6 max-w-md text-muted-foreground leading-relaxed">
+          Aurelian ends where application policy begins. It verifies proof and runs token protocols without becoming your user database.
+        </p>
+      </div>
+
+      <div class="grid overflow-hidden rounded-blume border border-border sm:grid-cols-2 lg:col-span-7">
+        <div class="bg-muted p-6 sm:p-7">
+          <p class="font-mono text-[11px] text-accent uppercase tracking-wider">Aurelian owns</p>
+          <ul class="mt-6 divide-y divide-border border-border border-t text-sm">
+            <li class="py-4">Proof verification</li>
+            <li class="py-4">Protocol and one-time state</li>
+            <li class="py-4">Token signing and rotation</li>
+            <li class="py-4">Profile validation</li>
+          </ul>
+        </div>
+        <div class="border-border border-t bg-background p-6 sm:border-l sm:border-t-0 sm:p-7">
+          <p class="font-mono text-[11px] text-muted-foreground uppercase tracking-wider">Your application owns</p>
+          <ul class="mt-6 divide-y divide-border border-border border-t text-sm">
+            <li class="py-4">Users and linked identities</li>
+            <li class="py-4">Roles and permissions</li>
+            <li class="py-4">Workspace membership</li>
+            <li class="py-4">Authorization policy</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="border-border border-b py-16 sm:py-20" aria-labelledby="flow-heading">
+    <div class="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="font-mono text-[11px] text-accent uppercase tracking-wider">03 / One complete flow</p>
+        <h2 id="flow-heading" class="mt-4 font-display text-4xl tracking-tight sm:text-5xl">Four explicit boundaries.</h2>
+      </div>
+      <a class="inline-flex items-center gap-2 text-accent text-sm hover:underline" href="/provider-flows">Read provider flows <Icon name="arrow-right" size={14} /></a>
     </div>
 
-    <ol class="mt-10 grid overflow-hidden rounded-blume border border-border bg-background divide-y divide-border lg:grid-cols-4 lg:divide-x lg:divide-y-0" aria-label="Authentication request flow">
+    <ol class="mt-10 grid overflow-hidden rounded-blume border border-border bg-background divide-y divide-border md:grid-cols-4 md:divide-x md:divide-y-0">
       {
-        flowSteps.map((step, index) => (
-          <li class="relative p-5">
-            <div class="flex items-center justify-between gap-3">
-              <span class="font-mono text-accent text-xs">{String(index + 1).padStart(2, '0')}</span>
-              {index < flowSteps.length - 1 && <span class="text-muted-foreground" aria-hidden="true">→</span>}
+        flow.map((step, index) => (
+          <li class="relative p-5 sm:p-6">
+            <div class="flex items-center justify-between">
+              <span class="font-mono text-[10px] text-muted-foreground">0{index + 1}</span>
+              <span class="inline-flex h-9 w-9 items-center justify-center rounded-blume border border-border bg-muted text-accent">
+                <Icon name={step.icon} size={17} />
+              </span>
             </div>
-            <h3 class="mt-6 font-medium text-base">{step.title}</h3>
-            <p class="mt-2 text-muted-foreground text-sm leading-relaxed">{step.description}</p>
+            <h3 class="mt-8 font-display text-2xl">{step.title}</h3>
+            <code class="mt-2 block font-mono text-xs text-accent">{step.code}</code>
+            <p class="mt-5 text-muted-foreground text-sm leading-relaxed">{step.description}</p>
+            {index < flow.length - 1 && (
+              <span class="absolute top-1/2 right-[-0.7rem] z-10 hidden h-6 w-6 items-center justify-center rounded-full border border-border bg-background text-muted-foreground md:inline-flex" aria-hidden="true">
+                <Icon name="arrow-right" size={12} />
+              </span>
+            )}
           </li>
         ))
       }
     </ol>
   </section>
 
-  <section class="border-border border-t py-16 sm:py-20" id="start-here" aria-labelledby="start-heading">
-    <div class="grid gap-10 lg:grid-cols-[minmax(14rem,1fr)_minmax(0,2fr)]">
-      <div>
-        <p class="font-medium text-accent text-sm">Start here</p>
-        <h2 id="start-heading" class="mt-2 font-medium text-3xl tracking-tight">Choose the right guide</h2>
-        <p class="mt-4 text-muted-foreground text-sm leading-relaxed">
-          Follow the complete sign-in flow first, then adapt the service to your runtime.
-        </p>
+  <section class="border-border border-b py-16 sm:py-20" aria-labelledby="guarantees-heading">
+    <div class="grid gap-10 lg:grid-cols-12 lg:gap-8">
+      <div class="lg:col-span-4">
+        <p class="font-mono text-[11px] text-accent uppercase tracking-wider">04 / Security model</p>
+        <h2 id="guarantees-heading" class="mt-4 font-display text-4xl tracking-tight sm:text-5xl">Dangerous behavior stays visible.</h2>
+        <p class="mt-6 text-muted-foreground text-sm leading-relaxed">The storage and session contracts make replay, expiry, and mutable authorization boundaries explicit.</p>
       </div>
+      <div class="overflow-hidden rounded-blume border border-border bg-background lg:col-span-8">
+        {
+          guarantees.map((guarantee) => (
+            <article class="grid gap-5 border-border border-b p-5 last:border-b-0 sm:grid-cols-[3rem_minmax(9rem,0.7fr)_minmax(0,1.3fr)] sm:items-center sm:p-6">
+              <span class="inline-flex h-10 w-10 items-center justify-center rounded-blume bg-muted text-accent">
+                <Icon name={guarantee.icon} size={18} />
+              </span>
+              <div>
+                <span class="font-mono text-[10px] text-muted-foreground">{guarantee.number}</span>
+                <h3 class="mt-1 font-medium text-sm">{guarantee.title}</h3>
+              </div>
+              <p class="text-muted-foreground text-sm leading-relaxed">{guarantee.description}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
 
-      <div>
-        <div class="grid gap-4 sm:grid-cols-2">
-          <Card cta="Build the example" href="/quickstart" title="Quickstart" type="tip">
-            Configure Google sign-in and follow the authentication flow end to end.
-          </Card>
-          <Card cta="Configure the service" href="/setup" title="Setup">
-            Install Aurelian, create signing keys, and connect profiles, providers, and storage.
-          </Card>
+  <section class="py-16 sm:py-24" aria-labelledby="start-heading">
+    <div class="overflow-hidden rounded-blume border border-border bg-muted">
+      <div class="grid gap-8 p-6 sm:p-8 lg:grid-cols-12 lg:items-end lg:p-10">
+        <div class="lg:col-span-7">
+          <p class="font-mono text-[11px] text-accent uppercase tracking-wider">05 / Start here</p>
+          <h2 id="start-heading" class="mt-4 max-w-3xl font-display text-4xl tracking-tight sm:text-5xl">From install to a verified session.</h2>
+          <p class="mt-5 max-w-xl text-muted-foreground leading-relaxed">Build the complete flow, then choose the provider and storage implementations that fit your application.</p>
         </div>
-
-        <nav class="mt-6" aria-label="Documentation paths">
-          <ul class="divide-y divide-border border-y border-border">
-            {
-              referencePaths.map((path) => (
-                <li>
-                  <a class="group grid gap-1 py-4 text-foreground no-underline transition-colors hover:text-accent sm:grid-cols-[9rem_1fr_auto] sm:items-center sm:gap-4" href={path.href}>
-                    <span class="font-medium text-sm">{path.title}</span>
-                    <span class="text-muted-foreground text-sm leading-relaxed">{path.description}</span>
-                    <span class="text-accent transition-transform group-hover:translate-x-0.5" aria-hidden="true">→</span>
-                  </a>
-                </li>
-              ))
-            }
-          </ul>
-        </nav>
+        <div class="lg:col-span-5">
+          <CodeBlock code="pnpm add aurelian zod" lang="bash" title="Terminal" />
+        </div>
       </div>
+      <nav class="grid border-border border-t sm:grid-cols-2 lg:grid-cols-4" aria-label="Start reading">
+        <a class="group border-border border-b p-5 text-foreground no-underline transition-colors hover:bg-background sm:border-r lg:border-b-0" href="/quickstart">
+          <span class="font-mono text-[10px] text-muted-foreground">01</span>
+          <span class="mt-6 flex items-center justify-between font-medium">Quickstart <Icon class="text-accent transition-transform group-hover:translate-x-0.5" name="arrow-right" size={15} /></span>
+          <small class="mt-2 block text-muted-foreground">Complete authentication flow</small>
+        </a>
+        <a class="group border-border border-b p-5 text-foreground no-underline transition-colors hover:bg-background lg:border-r lg:border-b-0" href="/provider-flows">
+          <span class="font-mono text-[10px] text-muted-foreground">02</span>
+          <span class="mt-6 flex items-center justify-between font-medium">Providers <Icon class="text-accent transition-transform group-hover:translate-x-0.5" name="arrow-right" size={15} /></span>
+          <small class="mt-2 block text-muted-foreground">Proof and identity contracts</small>
+        </a>
+        <a class="group border-border border-b p-5 text-foreground no-underline transition-colors hover:bg-background sm:border-r lg:border-b-0" href="/storage">
+          <span class="font-mono text-[10px] text-muted-foreground">03</span>
+          <span class="mt-6 flex items-center justify-between font-medium">Storage <Icon class="text-accent transition-transform group-hover:translate-x-0.5" name="arrow-right" size={15} /></span>
+          <small class="mt-2 block text-muted-foreground">Adapters and atomic consume</small>
+        </a>
+        <a class="group p-5 text-foreground no-underline transition-colors hover:bg-background" href="/api">
+          <span class="font-mono text-[10px] text-muted-foreground">04</span>
+          <span class="mt-6 flex items-center justify-between font-medium">API reference <Icon class="text-accent transition-transform group-hover:translate-x-0.5" name="arrow-right" size={15} /></span>
+          <small class="mt-2 block text-muted-foreground">Exports, routes, and types</small>
+        </a>
+      </nav>
     </div>
   </section>
-
-  <section class="border-border border-t py-16 sm:py-20" aria-labelledby="capability-heading">
-    <div class="grid gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(17rem,1fr)]">
-      <div>
-        <p class="font-medium text-accent text-sm">Core capabilities</p>
-        <h2 id="capability-heading" class="mt-2 font-medium text-3xl tracking-tight">Use the built-in protocol controls</h2>
-        <ul class="mt-8 grid border-border border-t sm:grid-cols-2">
-          {
-            capabilities.map((capability) => (
-              <li class="border-border border-b py-5 sm:odd:pr-6 sm:even:border-l sm:even:pl-6">
-                <h3 class="font-medium text-sm">{capability.title}</h3>
-                <p class="mt-2 text-muted-foreground text-sm leading-relaxed">{capability.description}</p>
-              </li>
-            ))
-          }
-        </ul>
-      </div>
-
-      <aside aria-labelledby="security-heading">
-        <h3 id="security-heading" class="mb-3 font-medium text-accent text-sm">Security</h3>
-        <Card href="/security" title="Protect one-time state" type="tip" cta="Read the security guide">
-          <p>
-            OAuth state, authorization codes, and refresh tokens depend on atomic consumption to prevent replay.
-          </p>
-          <ul class="mt-4 list-disc space-y-2 pl-4">
-            <li>Require exact redirect URIs and S256 PKCE.</li>
-            <li>Keep refresh sessions on their original absolute expiry.</li>
-            <li>Recheck mutable authorization data during refresh.</li>
-          </ul>
-        </Card>
-      </aside>
-    </div>
-  </section>
-</div>
+</main>

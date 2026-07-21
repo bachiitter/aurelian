@@ -23,11 +23,12 @@ export default defineConfig({
       {
         items: [
           '/architecture',
-          '/profiles',
           '/provider-flows',
+          '/profiles',
           '/sessions',
           '/claims',
           '/storage',
+          '/custom-storage',
           '/client',
         ],
         label: 'Core Concepts',
@@ -36,11 +37,9 @@ export default defineConfig({
         items: [
           '/mounting',
           '/runtime',
-          '/custom-storage',
           '/account-linking',
           '/multiple-accounts',
           '/multiple-workspaces',
-          '/testing',
           '/errors',
         ],
         label: 'Guides',

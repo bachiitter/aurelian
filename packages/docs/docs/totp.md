@@ -257,4 +257,4 @@ Notify the user when a factor or recovery set changes. Require recent proof to d
 
 Test expired enrollment, wrong code, clock-window edges, reused login tickets, concurrent code submissions, lower or equal counters, recovery-code reuse, and factor removal. Use a controlled clock rather than waiting for real 30-second windows.
 
-Continue with [Step-up auth](/step-up-auth), [Security](/security), and [Testing](/testing).
+Continue with [Step-up auth](/step-up-auth) and [Security](/security).

@@ -83,4 +83,4 @@ Use route responses directly when the UI needs a specific server code. Otherwise
 
 Test an unknown provider, malformed body, rejected credentials, disallowed redirect, missing PKCE, replayed state, wrong verifier, reused refresh token, resolver exception, and storage exception. Assert status, error code, and request-ID propagation.
 
-Continue with [Testing](/testing) and use [API](/api) for route contracts.
+Use [API](/api) for route contracts and [Security](/security) for failure-boundary guidance.

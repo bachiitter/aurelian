@@ -290,4 +290,4 @@ Do not issue a new session merely because registration succeeded. Return to the 
 
 Test wrong challenge, origin, RP ID, ceremony type, user-verification flag, credential ID, expired transaction, transaction replay, duplicate registration, counter regression, and concurrent assertions. Also test an always-zero authenticator and document the reduced clone detection.
 
-Continue with [Step-up auth](/step-up-auth), [Security](/security), and [Testing](/testing).
+Continue with [Step-up auth](/step-up-auth) and [Security](/security).

@@ -1,73 +1,100 @@
 ---
 title: Storage
-description: Persist rotating credentials and one-time transaction state
+description: Persist short-lived records with clear replay guarantees
 ---
 
 ## Understand the contract
 
-A storage adapter has only `set` and `consume`. TTLs are positive seconds, and `consume` must return and delete one value atomically.
+Import `StorageAdapter` from `aurelian/storage`. It exposes only `set` and `consume`.
 
 ```ts
-import type { StorageAdapter } from 'aurelian/storage';
+import type { StorageAdapter } from 'aurelian/storage'
 
-type StorageContract = StorageAdapter;
+declare const storage: StorageAdapter
+
+await storage.set('key', { value: 1 }, { ttl: 300 })
+const value = await storage.consume<{ value: number }>('key')
 ```
 
-Aurelian stores OAuth state for 10 minutes, authorization codes for 5 minutes, and refresh records for the configured session TTL. Keys contain a SHA-256 hash of the secret rather than the secret itself.
+`ttl` is a relative lifetime in seconds. `consume<Value>` must atomically return and delete an unexpired value, or return `null` when it is missing or expired.
+
+---
+
+## Know what is stored
+
+Aurelian writes OAuth state for 10 minutes, authorization codes for 5 minutes, and refresh records for the remaining refresh-session lifetime. Keys use a SHA-256 hash of each secret and start with `aurelian:state:`, `aurelian:code:`, or `aurelian:refresh:`.
+
+Aurelian chooses keys, values, and TTLs. The adapter owns persistence, expiry enforcement, serialization, availability, consistency, and atomic consumption.
 
 ---
 
 ## Use memory locally
 
-Import the process-local adapter from its dedicated export.
+`memoryStorage` is a shipped, process-local implementation with a dedicated import.
 
 ```ts
-import { memoryStorage } from 'aurelian/storage/memory';
+import { memoryStorage } from 'aurelian/storage/memory'
 
-const storage = memoryStorage();
+const storage = memoryStorage()
 ```
 
-Values disappear on restart, and separate processes do not share the map. Use it for tests and local development only.
+It stores values without serialization, deletes expired entries during writes, and returns expired entries as `null` during consume. A consume reads and deletes synchronously before its promise resolves, so concurrent calls in one JavaScript process have one winner.
 
----
-
-## Choose production storage
-
-Use a strongly consistent backend with a native read-and-delete operation or a transaction that locks one key. Redis `GETDEL`, a database `DELETE` with `RETURNING`, or an equivalent conditional transaction can satisfy the contract.
-
-Do not build `consume` as an unprotected `get` followed by `delete`. Two requests can read the same value before either deletion finishes.
+Values disappear on restart and are not shared across processes or isolates. Use this adapter for local development and single-process tests, not production or distributed replay protection.
 
 ---
 
 ## Opt into Workers KV
 
-The bundled adapter makes its weaker behavior explicit.
+`cloudflareKVStorage`, `CloudflareKVNamespace`, and `CloudflareKVStorageOptions` are shipped from `aurelian/storage/cloudflare-kv`. The function and both types are also re-exported from `aurelian/storage`.
 
 ```ts
-import { cloudflareKVStorage } from 'aurelian/storage/cloudflare-kv';
+import { cloudflareKVStorage } from 'aurelian/storage/cloudflare-kv'
+import type {
+  CloudflareKVNamespace,
+  CloudflareKVStorageOptions
+} from 'aurelian/storage/cloudflare-kv'
 
-const storage = cloudflareKVStorage({
+declare const AUTH_KV: CloudflareKVNamespace
+
+const options: CloudflareKVStorageOptions = {
   dangerouslyAllowNonAtomicConsume: true,
-  namespace: env.AUTH_KV
-});
+  namespace: AUTH_KV
+}
+
+const storage = cloudflareKVStorage(options)
 ```
 
-Define `env.AUTH_KV` as a binding with `get`, `put`, and `delete` methods matching `CloudflareKVNamespace`. Workers KV is eventually consistent and the adapter uses `get` followed by `delete`, so concurrent requests can consume one record more than once.
-
-KV `expirationTtl` has a 60-second minimum, and the adapter rejects shorter values. Stored values must serialize to JSON.
+The unsafe flag is a required TypeScript opt-in; the implementation does not inspect it at runtime. The namespace needs compatible `get`, `put`, and `delete` methods, so a Workers KV binding can be passed directly.
 
 ---
 
-## Handle failures
+## Accept weaker guarantees
 
-Let storage errors reject so `auth.handler` can call `onError` and return a correlated `500`. Do not convert a backend outage into `null`, because that makes an operational failure look like an invalid token.
+The KV adapter performs `get` and then `delete`. That sequence is **not atomic**, and Workers KV is eventually consistent, so concurrent requests or different locations can consume the same state, code, or refresh record more than once.
 
-Expired values must behave like missing values. Validate TTLs and serialization before writing when the backend does not do it reliably.
+Use it only where that replay risk is explicitly acceptable. Choose a strongly consistent transactional service, Durable Object, or atomic key-value command when strict single use matters.
 
 ---
 
-## Test guarantees
+## Respect KV limits
 
-Test one successful consume, a second `null`, concurrent consumption, expiry, serialization failure, backend failure, and large refresh TTLs. Run those tests against the actual production service and topology.
+Writes use `JSON.stringify` and reads use `JSON.parse`. Values therefore lose non-JSON types and must not contain unsupported values or cycles; top-level values that stringify to `undefined` are rejected.
 
-Continue with [Custom storage](/custom-storage), [Sessions](/sessions), [Security](/security), and [Runtime](/runtime).
+The adapter rejects TTLs below 60 seconds because Workers KV requires `expirationTtl >= 60`. Parse failures and namespace errors reject rather than becoming `null`.
+
+---
+
+## Propagate failures
+
+Return `null` only for missing or expired records. Let serialization and backend failures reject so `auth.handler` can call `onError` and return a correlated `500 internal_server_error`.
+
+Direct `auth.refresh`, `auth.revoke`, and `auth.issue` calls are not wrapped by the handler and reject with the storage error. See [Custom storage](/custom-storage) for a production adapter.
+
+---
+
+## Test behavior
+
+Test set and consume, a second consume returning `null`, TTL units, expiry boundaries, serialization, and backend failures. Run simultaneous consumes against the real deployment topology and require exactly one winner for any adapter claiming atomic behavior.
+
+Also run OAuth state replay, authorization-code replay, and refresh rotation against that adapter. Continue with [Security](/security) and [Runtime](/runtime).
