@@ -1,6 +1,15 @@
 import { DurableObject } from 'cloudflare:workers';
+import type { AuthenticatorTransportFuture } from '@simplewebauthn/server';
 import type { StorageAdapter } from 'aurelian/storage';
-import type { StoredCredential } from './types.js';
+
+type StoredCredential = {
+  counter: number;
+  email: string;
+  id: string;
+  publicKey: number[];
+  transports?: AuthenticatorTransportFuture[];
+  userId: string;
+};
 
 type StoredValue<Value = unknown> = {
   expiresAt: number;
@@ -47,13 +56,12 @@ export class AuthStorage extends DurableObject {
   ): Promise<boolean> {
     return this.ctx.storage.transaction(async (transaction) => {
       const stored = await transaction.get<StoredValue<StoredCredential>>(key);
-      const credential = stored?.value;
 
       if (
         !stored ||
         stored.expiresAt <= Date.now() ||
-        credential?.id !== credentialId ||
-        credential.counter !== expected ||
+        stored.value.id !== credentialId ||
+        stored.value.counter !== expected ||
         next < expected
       ) {
         return false;
@@ -61,7 +69,7 @@ export class AuthStorage extends DurableObject {
 
       await transaction.put(key, {
         ...stored,
-        value: { ...credential, counter: next },
+        value: { ...stored.value, counter: next },
       } satisfies StoredValue);
       return true;
     });

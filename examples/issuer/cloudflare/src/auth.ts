@@ -1,5 +1,5 @@
 import { createAuth, defineProfiles } from 'aurelian';
-import type { Auth, Provider } from 'aurelian';
+import type { Auth, ProfilePayload, Provider } from 'aurelian';
 import { code } from 'aurelian/providers/code';
 import { credentials } from 'aurelian/providers/credentials';
 import { google } from 'aurelian/providers/google';
@@ -18,20 +18,12 @@ const profiles = defineProfiles({
   }),
 });
 
-type UserProfile = {
-  properties: {
-    email: string;
-    id: string;
-  };
-  type: 'user';
-};
-
 type StoredPasskeyState = {
   authorization: string | null;
   value: PasskeyState;
 };
 
-export function createExampleAuth(env: Env): Auth<UserProfile> {
+export function createExampleAuth(env: Env): Auth<ProfilePayload<typeof profiles>> {
   const appURL = new URL(env.APP_ORIGIN);
   const records = env.AUTH_STORAGE.getByName('aurelian-auth');
   const storage = durableObjectStorage(env.AUTH_STORAGE);
@@ -45,7 +37,7 @@ export function createExampleAuth(env: Env): Auth<UserProfile> {
         }
       : {};
 
-  return createAuth({
+  const auth: Auth<ProfilePayload<typeof profiles>> = createAuth({
     issuer: env.AUTH_ISSUER,
     onError(error, context) {
       console.error({
@@ -133,7 +125,7 @@ export function createExampleAuth(env: Env): Auth<UserProfile> {
         async getRegistrationUser(request) {
           const authorization = request.headers.get('authorization');
           const session = authorization?.startsWith('Bearer ')
-            ? await createExampleAuth(env).verify(authorization.slice(7))
+            ? await auth.verify(authorization.slice(7))
             : null;
 
           return session?.valid
@@ -210,4 +202,6 @@ export function createExampleAuth(env: Env): Auth<UserProfile> {
     },
     storage,
   });
+
+  return auth;
 }

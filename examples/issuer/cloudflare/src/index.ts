@@ -24,14 +24,8 @@ export default {
 
     let response: Response;
 
-    if (url.pathname === '/') {
-      response = Response.json({ name: 'Aurelian Cloudflare issuer' });
-    } else if (url.pathname === '/auth' || url.pathname.startsWith('/auth/')) {
+    if (url.pathname === '/auth' || url.pathname.startsWith('/auth/')) {
       response = await createExampleAuth(env).handler(request);
-    } else if (url.pathname === '/demo/config') {
-      response = Response.json({
-        google: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
-      });
     } else {
       response = new Response('Not found.', { status: 404 });
     }

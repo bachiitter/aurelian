@@ -4,52 +4,24 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
 } from '@simplewebauthn/browser';
 import type { TokenResponse } from 'aurelian/client';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
-import { authClient, workerOrigin } from './authClient.js';
+import { authClient, authIssuer } from './authClient.js';
 
 const DEMO_EMAIL = 'demo@example.com';
+const isGoogleEnabled = import.meta.env.VITE_GOOGLE_ENABLED === 'true';
 
 export function App() {
   const [verificationCode, setVerificationCode] = useState('');
-  const [isGoogleEnabled, setIsGoogleEnabled] = useState(false);
   const [operation, setOperation] = useState('idle');
   const [output, setOutput] = useState<unknown>({
     message: 'Sign in to create a session.',
   });
-  const activeOperation = useRef(false);
   const isBusy = operation !== 'idle';
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    void fetch(`${workerOrigin}/demo/config`, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`config_request_failed_${response.status}`);
-        }
-
-        const config: { google: boolean } = await response.json();
-        setIsGoogleEnabled(config.google);
-      })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) {
-          const message = error instanceof Error ? error.message : 'request_failed';
-          setOutput({ error: { code: message, message } });
-        }
-      });
-
-    return () => controller.abort();
-  }, []);
 
   async function signIn(event: SyntheticEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
 
-    if (activeOperation.current) {
-      return;
-    }
-
-    activeOperation.current = true;
     setOperation('signing-in');
 
     try {
@@ -72,17 +44,11 @@ export function App() {
       const message = error instanceof Error ? error.message : 'sign_in_failed';
       setOutput({ error: { code: message, message } });
     } finally {
-      activeOperation.current = false;
       setOperation('idle');
     }
   }
 
   async function signInWithGoogle(): Promise<void> {
-    if (activeOperation.current) {
-      return;
-    }
-
-    activeOperation.current = true;
     setOperation('redirecting');
 
     try {
@@ -92,21 +58,15 @@ export function App() {
       const message = error instanceof Error ? error.message : 'authorization_failed';
       setOutput({ error: { code: message, message } });
     } finally {
-      activeOperation.current = false;
       setOperation('idle');
     }
   }
 
   async function requestEmailCode(): Promise<void> {
-    if (activeOperation.current) {
-      return;
-    }
-
-    activeOperation.current = true;
     setOperation('requesting-code');
 
     try {
-      const response = await fetch(`${workerOrigin}/auth/code/request`, {
+      const response = await fetch(`${authIssuer}/code/request`, {
         body: JSON.stringify({ identifier: DEMO_EMAIL }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
@@ -128,17 +88,11 @@ export function App() {
       const message = error instanceof Error ? error.message : 'code_request_failed';
       setOutput({ error: { code: message, message } });
     } finally {
-      activeOperation.current = false;
       setOperation('idle');
     }
   }
 
   async function signInWithEmailCode(): Promise<void> {
-    if (activeOperation.current) {
-      return;
-    }
-
-    activeOperation.current = true;
     setOperation('signing-in');
 
     try {
@@ -153,24 +107,18 @@ export function App() {
       const message = error instanceof Error ? error.message : 'sign_in_failed';
       setOutput({ error: { code: message, message } });
     } finally {
-      activeOperation.current = false;
       setOperation('idle');
     }
   }
 
   async function registerPasskey(): Promise<void> {
-    if (activeOperation.current) {
-      return;
-    }
-
-    activeOperation.current = true;
     setOperation('registering-passkey');
 
     try {
       const accessToken = localStorage.getItem('aurelian.accessToken');
       if (!accessToken) throw new Error('session_missing');
       const optionsResponse = await fetch(
-        `${workerOrigin}/auth/passkey/registration/start`,
+        `${authIssuer}/passkey/registration/start`,
         {
           body: '{}',
           headers: {
@@ -194,7 +142,7 @@ export function App() {
         optionsJSON: result.options,
       });
       const verificationResponse = await fetch(
-        `${workerOrigin}/auth/passkey/registration/verify`,
+        `${authIssuer}/passkey/registration/verify`,
         {
           body: JSON.stringify({
             response: passkeyResponse,
@@ -214,22 +162,16 @@ export function App() {
       const message = error instanceof Error ? error.message : 'passkey_registration_failed';
       setOutput({ error: { code: message, message } });
     } finally {
-      activeOperation.current = false;
       setOperation('idle');
     }
   }
 
   async function signInWithPasskey(): Promise<void> {
-    if (activeOperation.current) {
-      return;
-    }
-
-    activeOperation.current = true;
     setOperation('signing-in');
 
     try {
       const optionsResponse = await fetch(
-        `${workerOrigin}/auth/passkey/authentication/start`,
+        `${authIssuer}/passkey/authentication/start`,
       );
       const result: {
         options: PublicKeyCredentialRequestOptionsJSON;
@@ -243,7 +185,7 @@ export function App() {
 
       const response = await startAuthentication({ optionsJSON: result.options });
       const verificationResponse = await fetch(
-        `${workerOrigin}/auth/passkey/authentication/verify`,
+        `${authIssuer}/passkey/authentication/verify`,
         {
           body: JSON.stringify({ response, state: result.state }),
           headers: { 'content-type': 'application/json' },
@@ -264,17 +206,11 @@ export function App() {
       const message = error instanceof Error ? error.message : 'passkey_sign_in_failed';
       setOutput({ error: { code: message, message } });
     } finally {
-      activeOperation.current = false;
       setOperation('idle');
     }
   }
 
   async function verifySession(): Promise<void> {
-    if (activeOperation.current) {
-      return;
-    }
-
-    activeOperation.current = true;
     setOperation('verifying');
 
     try {
@@ -285,17 +221,11 @@ export function App() {
       const message = error instanceof Error ? error.message : 'verification_failed';
       setOutput({ error: { code: message, message } });
     } finally {
-      activeOperation.current = false;
       setOperation('idle');
     }
   }
 
   async function refreshSession(): Promise<void> {
-    if (activeOperation.current) {
-      return;
-    }
-
-    activeOperation.current = true;
     setOperation('refreshing');
 
     try {
@@ -311,17 +241,11 @@ export function App() {
       const message = error instanceof Error ? error.message : 'refresh_failed';
       setOutput({ error: { code: message, message } });
     } finally {
-      activeOperation.current = false;
       setOperation('idle');
     }
   }
 
   async function revokeSession(): Promise<void> {
-    if (activeOperation.current) {
-      return;
-    }
-
-    activeOperation.current = true;
     setOperation('revoking');
 
     try {
@@ -335,7 +259,6 @@ export function App() {
       const message = error instanceof Error ? error.message : 'revocation_failed';
       setOutput({ error: { code: message, message } });
     } finally {
-      activeOperation.current = false;
       setOperation('idle');
     }
   }
@@ -388,13 +311,15 @@ export function App() {
           </button>
 
           <div className="provider-actions">
-            <button
-              disabled={isBusy || !isGoogleEnabled}
-              onClick={() => void signInWithGoogle()}
-              type="button"
-            >
-              Google OAuth
-            </button>
+            {isGoogleEnabled && (
+              <button
+                disabled={isBusy}
+                onClick={() => void signInWithGoogle()}
+                type="button"
+              >
+                Google OAuth
+              </button>
+            )}
             <button
               disabled={isBusy}
               onClick={() => void requestEmailCode()}

@@ -5,9 +5,9 @@ export type UserProfile = {
   type: 'user';
 };
 
-export const authIssuer =
-  import.meta.env.VITE_AUTH_ISSUER ?? 'http://localhost:8787/auth';
-export const workerOrigin = new URL(authIssuer).origin;
+export const authIssuer = (
+  import.meta.env.VITE_AUTH_ISSUER ?? 'http://localhost:8787/auth'
+).replace(/\/$/, '');
 
 export const authClient = createClient<UserProfile>({
   issuer: authIssuer,
