@@ -1,293 +1,130 @@
 ---
 title: Passkeys
-description: Connect WebAuthn ceremonies to Aurelian request providers
+description: Connect browser ceremonies to provider-owned WebAuthn routes
 ---
 
 ## Install helpers
 
-Aurelian issues the session after WebAuthn verifies an identity. This guide uses SimpleWebAuthn 13 for browser ceremonies and server verification.
+Use SimpleWebAuthn in the browser. Aurelian's provider generates and verifies both registration and authentication options.
 
 ```bash
 pnpm add @simplewebauthn/browser @simplewebauthn/server
 ```
 
-Your application owns registration, credential storage, recovery, RP policy, and challenge transactions. Require HTTPS outside local development.
+Configure every `PasskeyOptions` callback in the [provider reference](/passkey-provider). Developer code owns state and credential persistence, while the provider owns all four ceremony routes.
 
 ---
 
-## Define stored data
+## Register a credential
 
-Persist the fields returned in `registrationInfo.credential`.
-
-```ts
-import type { AuthenticatorTransportFuture } from '@simplewebauthn/server';
-
-type Passkey = {
-  counter: number;
-  credentialId: string;
-  id: string;
-  publicKey: Uint8Array;
-  transports?: AuthenticatorTransportFuture[];
-  userId: string;
-};
-
-type PasskeyChallenge = {
-  challenge: string;
-  ceremony: 'authentication' | 'registration';
-  userId?: string;
-};
-```
-
-Enforce a unique credential ID and store the public key as binary data. Keep registration and authentication challenges in an atomic, expiring application store.
-
----
-
-## Start authentication
-
-Create a discoverable-credential request without accepting a user ID from the browser.
+Start registration with an authenticated request. The provider calls `getRegistrationUser(request)` and returns `{ options, state }` for that account.
 
 ```ts
-import { generateAuthenticationOptions } from '@simplewebauthn/server';
-import { challengeStore } from '~/security/passkeys.js';
+import { startRegistration } from '@simplewebauthn/browser'
+import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser'
 
-async function createAuthenticationOptions(): Promise<Response> {
-  const transactionId = crypto.randomUUID();
-  const options = await generateAuthenticationOptions({
-    rpID: 'example.com',
-    userVerification: 'required'
-  });
-
-  await challengeStore.set(
-    `passkey:authentication:${transactionId}`,
-    {
-      challenge: options.challenge,
-      ceremony: 'authentication'
-    } satisfies PasskeyChallenge,
-    { ttl: 5 * 60 }
-  );
-
-  return Response.json({ options, transactionId });
-}
-```
-
-`challengeStore` is application-owned `StorageAdapter`. Bind rate-limit context server-side instead of trusting account hints from the request.
-
----
-
-## Verify in a provider
-
-Parse the request, look up its credential, consume the challenge, verify the assertion, and update the counter.
-
-```ts
-import { verifyAuthenticationResponse } from '@simplewebauthn/server';
-import type { RequestProvider } from 'aurelian';
-import {
-  challengeStore,
-  getPasskeyByCredentialId,
-  parseAuthenticationRequest,
-  updatePasskeyCounterIfGreater
-} from '~/security/passkeys.js';
-
-export const passkeyProvider: RequestProvider = {
-  async authenticate({ request }) {
-    const body = await parseAuthenticationRequest(request);
-
-    if (!body) {
-      return null;
-    }
-
-    const passkey = await getPasskeyByCredentialId(body.assertion.id);
-
-    if (!passkey) {
-      return null;
-    }
-
-    const transactionKey = `passkey:authentication:${body.transactionId}`;
-    const transaction = await challengeStore.consume<PasskeyChallenge>(
-      transactionKey
-    );
-
-    if (!transaction || transaction.ceremony !== 'authentication') {
-      return null;
-    }
-
-    const verification = await verifyAuthenticationResponse({
-      credential: {
-        counter: passkey.counter,
-        id: passkey.credentialId,
-        publicKey: passkey.publicKey,
-        transports: passkey.transports
-      },
-      expectedChallenge: transaction.challenge,
-      expectedOrigin: 'https://example.com',
-      expectedRPID: 'example.com',
-      requireUserVerification: true,
-      response: body.assertion
-    }).catch(() => null);
-
-    if (!verification?.verified) {
-      return null;
-    }
-
-    const nextCounter = verification.authenticationInfo.newCounter;
-    const isCounterless = passkey.counter === 0 && nextCounter === 0;
-    const isFresh =
-      isCounterless ||
-      (await updatePasskeyCounterIfGreater(passkey.id, nextCounter));
-
-    return isFresh ? { id: passkey.userId } : null;
-  },
-  type: 'request'
-};
-```
-
-`parseAuthenticationRequest` validates untrusted JSON and returns `{ assertion: AuthenticationResponseJSON; transactionId: string } | null`. The credential lookup returns `Passkey | null`, and the counter update performs one conditional `counter < nextCounter` write.
-
-SimpleWebAuthn rejects a non-zero counter that does not increase before returning verification. The conditional write also prevents two server requests that read the same old counter from both succeeding; always-zero authenticators cannot provide this clone signal.
-
----
-
-## Call from the browser
-
-Fetch options, run the ceremony, then send the assertion to the Aurelian provider route.
-
-```ts
-import { startAuthentication } from '@simplewebauthn/browser';
-import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
-import { authClient } from './auth-client.js';
-
-type AuthenticationOptionsPayload = {
-  options: PublicKeyCredentialRequestOptionsJSON;
-  transactionId: string;
-};
-
-const optionsResponse = await fetch('/passkeys/authentication-options');
-
-if (!optionsResponse.ok) {
-  throw new Error('passkey_options_failed');
+type RegistrationStart = {
+  options: PublicKeyCredentialCreationOptionsJSON
+  state: string
 }
 
-const payload: AuthenticationOptionsPayload = await optionsResponse.json();
-const assertion = await startAuthentication({
-  optionsJSON: payload.options
-});
-const tokens = await authClient.authenticate('passkey', {
-  assertion,
-  transactionId: payload.transactionId
-});
-```
+const startResponse = await fetch(
+  'https://auth.example.com/auth/passkey/registration/start',
+  {
+    headers: { authorization: 'Bearer development-session' },
+    method: 'POST'
+  }
+)
 
-Validate the options response at runtime in production instead of trusting the annotation. Browser cancellation is expected and should not be reported as a server failure.
+if (!startResponse.ok) {
+  throw new Error('passkey_registration_start_failed')
+}
 
----
-
-## Start registration
-
-Require recent authentication, exclude current credentials, and bind a fresh transaction to that user.
-
-```ts
-import { generateRegistrationOptions } from '@simplewebauthn/server';
-import {
-  challengeStore,
-  requireRecentlyAuthenticatedUser
-} from '~/security/passkeys.js';
-
-async function createRegistrationOptions(request: Request): Promise<Response> {
-  const user = await requireRecentlyAuthenticatedUser(request);
-  const transactionId = crypto.randomUUID();
-  const options = await generateRegistrationOptions({
-    attestationType: 'none',
-    authenticatorSelection: {
-      residentKey: 'preferred',
-      userVerification: 'required'
+const registration: RegistrationStart = await startResponse.json()
+const response = await startRegistration({
+  optionsJSON: registration.options
+})
+const verifyResponse = await fetch(
+  'https://auth.example.com/auth/passkey/registration/verify',
+  {
+    body: JSON.stringify({ response, state: registration.state }),
+    headers: {
+      authorization: 'Bearer development-session',
+      'content-type': 'application/json'
     },
-    excludeCredentials: user.passkeys.map((passkey) => ({
-      id: passkey.credentialId,
-      transports: passkey.transports
-    })),
-    rpID: 'example.com',
-    rpName: 'Example',
-    userID: new TextEncoder().encode(user.id),
-    userName: user.email
-  });
+    method: 'POST'
+  }
+)
 
-  await challengeStore.set(
-    `passkey:registration:${transactionId}`,
-    {
-      challenge: options.challenge,
-      ceremony: 'registration',
-      userId: user.id
-    } satisfies PasskeyChallenge,
-    { ttl: 5 * 60 }
-  );
-
-  return Response.json({ options, transactionId });
+if (!verifyResponse.ok) {
+  throw new Error('passkey_registration_verify_failed')
 }
+
+const result: { verified: true } = await verifyResponse.json()
 ```
 
-The application-owned guard returns `{ email: string; id: string; passkeys: Passkey[] }`. SimpleWebAuthn 13 requires `userID` as bytes rather than a string.
+Replace the development authorization header with your normal session credentials. Registration verify consumes the state, verifies the response, and calls `saveCredential` with the identity selected at registration start.
+
+The provider requires a discoverable credential and user verification during registration. Credential IDs must be unique, and registration returns `{ verified: true }` without issuing a new Aurelian session.
 
 ---
 
-## Finish registration
+## Authenticate an account
 
-Consume the transaction, verify origin and RP ID, then save the credential uniquely for the bound user.
+Request fresh options from the authentication start route. Submit the browser response and matching state to the authentication verify route.
 
 ```ts
-import { verifyRegistrationResponse } from '@simplewebauthn/server';
-import {
-  challengeStore,
-  parseRegistrationRequest,
-  savePasskeyUnique
-} from '~/security/passkeys.js';
+import { startAuthentication } from '@simplewebauthn/browser'
+import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser'
+import type { TokenResponse } from 'aurelian'
 
-async function confirmRegistration(request: Request): Promise<Response> {
-  const body = await parseRegistrationRequest(request);
-
-  if (!body) {
-    return new Response('Invalid response', { status: 400 });
-  }
-
-  const transaction = await challengeStore.consume<PasskeyChallenge>(
-    `passkey:registration:${body.transactionId}`
-  );
-
-  if (
-    !transaction ||
-    transaction.ceremony !== 'registration' ||
-    !transaction.userId
-  ) {
-    return new Response('Challenge expired', { status: 400 });
-  }
-
-  const verification = await verifyRegistrationResponse({
-    expectedChallenge: transaction.challenge,
-    expectedOrigin: 'https://example.com',
-    expectedRPID: 'example.com',
-    response: body.response
-  }).catch(() => null);
-
-  if (!verification?.verified) {
-    return new Response('Verification failed', { status: 400 });
-  }
-
-  await savePasskeyUnique({
-    ...verification.registrationInfo.credential,
-    userId: transaction.userId
-  });
-
-  return new Response(null, { status: 204 });
+type AuthenticationStart = {
+  options: PublicKeyCredentialRequestOptionsJSON
+  state: string
 }
+
+const startResponse = await fetch(
+  'https://auth.example.com/auth/passkey/authentication/start'
+)
+
+if (!startResponse.ok) {
+  throw new Error('passkey_authentication_start_failed')
+}
+
+const authentication: AuthenticationStart = await startResponse.json()
+const response = await startAuthentication({
+  optionsJSON: authentication.options
+})
+const verifyResponse = await fetch(
+  'https://auth.example.com/auth/passkey/authentication/verify',
+  {
+    body: JSON.stringify({ response, state: authentication.state }),
+    headers: { 'content-type': 'application/json' },
+    method: 'POST'
+  }
+)
+
+if (!verifyResponse.ok) {
+  throw new Error('passkey_authentication_verify_failed')
+}
+
+const tokens: TokenResponse = await verifyResponse.json()
 ```
 
-`parseRegistrationRequest` returns `{ response: RegistrationResponseJSON; transactionId: string } | null`. `savePasskeyUnique` accepts `{ counter; id; publicKey; transports?; userId }` and rejects duplicate credential IDs in one database operation.
-
-Do not issue a new session merely because registration succeeded. Return to the current session and require the new credential in a later authentication or step-up ceremony.
+The verify endpoint consumes state, loads the credential by `response.id`, verifies the assertion, and updates a non-zero counter. It then resolves the credential identity and issues Aurelian tokens through the provider endpoint.
 
 ---
 
-## Test ceremonies
+## Persist safely
 
-Test wrong challenge, origin, RP ID, ceremony type, user-verification flag, credential ID, expired transaction, transaction replay, duplicate registration, counter regression, and concurrent assertions. Also test an always-zero authenticator and document the reduced clone detection.
+Store the `PasskeyState` registration/authentication union in shared, expiring storage and consume each value once. Bind registration state to the authenticated session at both start and verify, as shown in the [Cloudflare issuer example](https://github.com/bachiitter/aurelian/blob/main/examples/issuer/cloudflare/src/auth.ts).
 
-Continue with [Step-up auth](/step-up-auth) and [Security](/security).
+Do not require an existing login session when consuming authentication state because this ceremony runs before login. Authentication still requires user verification and one-time, promptly expiring state.
+
+Store credentials in a shared repository used by `getCredential`, `saveCredential`, and `updateCounter`. Compare and update non-zero counters atomically.
+
+---
+
+## Test failures
+
+Test wrong challenge, origin, RP ID, user-verification flag, credential ID, expiry, replay, duplicate registration, counter regression, and concurrent assertions. Also test an always-zero authenticator and document its reduced clone detection.

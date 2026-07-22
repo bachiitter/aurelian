@@ -5,21 +5,25 @@ description: Preserve replay protection and authorization boundaries
 
 ## Protect OAuth
 
-Allow exact client redirect URIs with `redirectURIs`; no redirect is accepted when this option is absent. Aurelian accepts only an S256 PKCE challenge with a 43-character base64url value.
+Supply the client return URI with `createClient({ redirectURI })` or `authorize({ redirectURI })`. `createAuth` accepts only HTTP(S), then binds the exact URI into one-time provider state and the authorization code.
 
-By default, the browser client generates fresh state and a verifier, stores both transaction values under that state, and consumes them before exchange. The server replaces client state with provider state, stores only its SHA-256 hash, and restores the client state after the callback.
+The PKCE token exchange must send that same URI. Aurelian also accepts only an S256 challenge with a 43-character base64url value.
+
+By default, the browser client generates fresh state and a verifier, stores one transaction record under that state, and removes it before exchange. The server replaces client state with provider state, stores only its SHA-256 hash, and restores the client state after the callback.
 
 Never reuse a custom state value. `createClient.authorize` rejects one that already has transaction data in its configured storage.
+
+Do not confuse the client return URI with the upstream provider callback. Register `${issuer}/${providerKey}/callback` with the provider; Aurelian derives it from server configuration rather than client input.
 
 ---
 
 ## Consume once
 
-`StorageAdapter.consume` must return and delete a value atomically. This operation protects OAuth state, authorization codes, and refresh tokens from concurrent replay.
+`StorageAdapter.consume` must return and delete a value atomically. This operation protects OAuth state, authorization codes, refresh tokens, and one-time proofs from concurrent replay.
 
-Consumption happens before later checks or external calls. A bad code verifier burns its authorization code, a failed provider callback burns its state, and a rejected refresh burns its refresh token.
+Consumption happens before later checks or external calls. One submitted six-digit value consumes its record even when it is wrong, just as a bad verifier burns its authorization code and a rejected refresh burns its refresh token.
 
-Use [Custom storage](/custom-storage) to implement and test this contract. The bundled Cloudflare KV adapter cannot provide it and requires an explicit unsafe opt-in.
+Use [Custom storage](/custom-storage) to implement and test this contract. Choose strongly consistent transactional storage, such as a Cloudflare Durable Object or transactional database.
 
 ---
 
@@ -45,7 +49,9 @@ Bind step-up, linking, TOTP, and passkey ceremonies to short-lived opaque transa
 
 Store the last accepted TOTP counter and update it only when the next counter is greater. Hash recovery codes, consume them once, and replace the full set after recovery.
 
-For passkeys, validate the expected challenge, origin, RP ID, and user verification. Store credential IDs uniquely, update non-zero counters with a conditional write, and recognize that always-zero authenticators cannot offer counter-based clone detection.
+Require discoverable credentials and user verification for passkey registration, then bind registration state to the authenticated session. Keep authentication state usable before login while still expiring and consuming it once.
+
+Validate the expected challenge, origin, RP ID, and user verification. Store credential IDs uniquely, update non-zero counters with a conditional write, and recognize that always-zero authenticators cannot offer counter-based clone detection.
 
 ---
 

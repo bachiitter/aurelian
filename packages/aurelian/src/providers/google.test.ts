@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { google } from './google.js';
 
-const CALLBACK_URL = 'https://auth.example.com/callback/google';
+const CALLBACK_URL = 'https://auth.example.com/google/callback';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -16,7 +16,7 @@ describe('google', () => {
     });
     const url = provider.authorizationUrl({
       callbackURL: CALLBACK_URL,
-      request: new Request('https://auth.example.com/authorize/google'),
+      request: new Request('https://auth.example.com/google/authorize'),
       scopes: ['email', 'https://www.googleapis.com/auth/drive.file'],
       state: 'upstream-state',
     });
@@ -88,7 +88,7 @@ describe('google', () => {
     const tokenRequest = fetchMock.mock.calls[0]?.[1];
 
     expect(String(tokenRequest?.body)).toBe(
-      'client_id=google-client&client_secret=google-secret&code=authorization-code&grant_type=authorization_code&redirect_uri=https%3A%2F%2Fauth.example.com%2Fcallback%2Fgoogle',
+      'client_id=google-client&client_secret=google-secret&code=authorization-code&grant_type=authorization_code&redirect_uri=https%3A%2F%2Fauth.example.com%2Fgoogle%2Fcallback',
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,

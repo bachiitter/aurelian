@@ -5,20 +5,25 @@ description: Verify identities before resolving application profiles
 
 ## Choose a flow
 
-Use a `RequestProvider` when one request contains the proof. Use an `OAuthProvider` when the browser must visit an external authorization server.
+Use an `OAuthProvider` when the browser must visit an authorization server. Use a `RequestProvider` when one request contains the proof.
 
-Both return a `ProviderIdentity`; the application-owned resolver turns that identity into a profile. Aurelian ships Google only—passwords, passkeys, GitHub, and other integrations are application patterns.
+Both return a `ProviderIdentity`, which your resolver turns into an application profile. Aurelian ships these factories:
+
+- Social authorization: [Google](/google), [GitHub](/github), [Discord](/discord), and [Twitch](/twitch)
+- Protocol helpers: [OAuth](/oauth) and [OIDC](/oidc)
+- Direct proofs: [Code](/code), [Credentials](/credentials), and [Passkey provider](/passkey-provider)
 
 ---
 
 ## Know the contracts
 
-Import every provider contract from the package root.
+Import shared contracts from the package root.
 
 ```ts
 import type {
   OAuthProvider,
   Provider,
+  ProviderEndpoint,
   ProviderIdentity,
   RequestProvider
 } from 'aurelian'
@@ -26,169 +31,137 @@ import type {
 
 `Provider` is the `OAuthProvider | RequestProvider` union. `ProviderIdentity` requires `id: string` and optionally carries `avatarUrl`, `email`, `emailVerified`, `name`, `raw`, and `username`.
 
+```ts
+type RequestProvider = {
+  authenticate(input: {
+    request: Request
+  }): ProviderIdentity | null | Promise<ProviderIdentity | null>
+  endpoints?: Record<string, ProviderEndpoint>
+  type: 'request'
+}
+
+type OAuthProvider = {
+  authorizationUrl(input: {
+    callbackURL: string
+    request: Request
+    scopes?: string[]
+    state: string
+  }): URL | Promise<URL>
+  callback(input: {
+    callbackURL: string
+    code: string
+    request: Request
+    state: string
+  }): ProviderIdentity | Promise<ProviderIdentity>
+  endpoints?: Record<string, ProviderEndpoint>
+  type: 'oauth'
+}
+```
+
 Treat `raw` as `unknown` and validate it before use. Resolve accounts by `(provider, id)`, not by an unverified email address.
-
-`RequestProvider.authenticate({ request })` may be synchronous or asynchronous and returns an identity or `null`. Aurelian passes the original standard Web `Request`.
-
-`OAuthProvider.authorizationUrl` receives `{ callbackURL, request, scopes, state }` and returns a `URL`. Its `callback` receives `{ callbackURL, code, request, state }` and returns an identity; both methods may return promises.
-
-The provider owns upstream URL construction, credential exchange, response validation, and identity normalization. Aurelian owns route validation, provider state, PKCE, callback derivation, one-time records, profile resolution, and response normalization.
 
 ---
 
-## Implement request authentication
+## Compare built-ins
 
-Parse the request as untrusted data and return `null` for an expected rejection. This example defines its application-owned verifier explicitly.
+Upstream provider callbacks always use `${issuer}/${providerKey}/callback` and must be registered with the provider. They are separate from client return URIs supplied through `createClient({ redirectURI })` or `authorize({ redirectURI })`.
+
+| Factory | Default scopes | Required identity | Optional normalized fields |
+| --- | --- | --- | --- |
+| Google | `openid email profile` | `sub` → `id` | `picture`, `email`, `email_verified`, `name` |
+| GitHub | `read:user user:email` | `id`, `login` | Avatar, primary email verification, name |
+| Discord | `identify email` | `id`, `username` | Avatar, email verification, global name |
+| Twitch | `user:read:email` | One user with `id`, `login` | Avatar, email, display name |
+| OIDC | `openid email profile` | Verified ID token `sub` | Picture, email verification, name, username |
+| OAuth | None | Defined by `identify` | Defined by `identify` |
+
+Configured scopes and request scopes are appended and deduplicated. Restrict client-selected scopes before requests reach `auth.handler` when the upstream permissions are sensitive.
+
+---
+
+## Understand ownership
+
+The protocol and social factories own upstream URL construction, code exchange, response validation, and identity normalization. Aurelian owns route validation, provider state, PKCE, callback derivation, one-time authorization codes, profile resolution, and response normalization.
+
+Generic OAuth is the exception for identity loading: its required `identify` callback fetches, validates, and normalizes the provider's user response. Generic OIDC verifies signed ID tokens and uses matching UserInfo claims only when discovery advertises that endpoint.
+
+Request factories delegate application policy through callbacks. Code callbacks own delivery, credentials callbacks own verification, and passkey callbacks own state and credential persistence.
+
+---
+
+## Implement a request
+
+Parse the standard `Request` as untrusted input and return `null` for an expected rejection. This complete provider checks a small in-memory API-key set.
 
 ```ts
 import type { ProviderIdentity, RequestProvider } from 'aurelian'
 
-type Credentials = {
-  email: string
-  password: string
-}
+const identitiesByKey = new Map<string, ProviderIdentity>([
+  [
+    'development-key',
+    {
+      id: 'service_local',
+      name: 'Local service'
+    }
+  ]
+])
 
-declare function verifyPassword(
-  credentials: Credentials
-): Promise<ProviderIdentity | null>
+export const apiKeyProvider: RequestProvider = {
+  authenticate({ request }) {
+    const authorization = request.headers.get('authorization')
 
-async function readCredentials(request: Request): Promise<Credentials | null> {
-  const value: unknown = await request.json().catch(() => null)
-
-  if (typeof value !== 'object' || value === null) {
-    return null
-  }
-
-  if (
-    !('email' in value) ||
-    typeof value.email !== 'string' ||
-    value.email.length > 320 ||
-    !('password' in value) ||
-    typeof value.password !== 'string' ||
-    value.password.length < 1 ||
-    value.password.length > 1024
-  ) {
-    return null
-  }
-
-  return { email: value.email, password: value.password }
-}
-
-export const passwordProvider: RequestProvider = {
-  async authenticate({ request }) {
-    if (request.headers.get('content-type') !== 'application/json') {
+    if (!authorization?.startsWith('Bearer ')) {
       return null
     }
 
-    const credentials = await readCredentials(request)
-
-    if (!credentials) {
-      return null
-    }
-
-    return verifyPassword(credentials)
+    return identitiesByKey.get(authorization.slice(7)) ?? null
   },
   type: 'request'
 }
 ```
 
-POST this provider at `${issuer}/authenticate/password` after registering it as `providers.password`. A `null` result becomes `401 authentication_failed`; a thrown error reaches `onError` and becomes `500 internal_server_error`.
+Register it as `providers.apiKey`, then post to `${issuer}/apiKey/authenticate`. A `null` result becomes `401 authentication_failed`; a thrown error reaches `onError` and becomes `500 internal_server_error`.
 
 ---
 
-## Configure Google
+## Expose operations
 
-Import the shipped factory and its options from the dedicated export. `clientId` and `clientSecret` must be non-empty strings.
+Either provider type may expose named endpoints.
 
 ```ts
-import { createAuth, defineProfiles } from 'aurelian'
-import { google } from 'aurelian/providers/google'
-import type { GoogleOptions } from 'aurelian/providers/google'
-import { memoryStorage } from 'aurelian/storage/memory'
-import { z } from 'zod'
-
-declare const privateKey: string
-declare const publicKey: string
-
-const googleOptions: GoogleOptions = {
-  clientId: 'google-client-id',
-  clientSecret: 'google-client-secret',
-  scopes: ['https://www.googleapis.com/auth/calendar.readonly']
-}
-
-const profiles = defineProfiles({
-  user: z.object({
-    email: z.string().email().optional(),
-    id: z.string().min(1)
-  })
-})
-
-const auth = createAuth({
-  issuer: 'https://auth.example.com/auth',
-  profiles,
-  providers: { google: google(googleOptions) },
-  redirectURIs: ['https://app.example.com/signed-in'],
-  resolve({ profile, response }) {
-    if (response.provider !== 'google') {
-      throw new Error('provider_unsupported')
+type ProviderEndpoint =
+  | {
+      authenticate: true
+      method: 'POST'
     }
-
-    return profile('user', {
-      email: response.data.email,
-      id: response.data.id
-    })
-  },
-  signing: { algorithm: 'ES256', privateKey, publicKey },
-  storage: memoryStorage()
-})
+  | {
+      handler(request: Request): Response | Promise<Response>
+      method: 'GET' | 'POST'
+    }
 ```
 
-`auth.handler` is a standard `(Request) => Promise<Response>` function, so mount it with the host runtime of your choice. Use shared atomic storage instead of memory in production.
+An endpoint at `providers.magic.endpoints.request` is mounted at `/magic/request` beneath the issuer path. Slash-separated keys create nested routes, so `registration/start` mounts at `/magic/registration/start`.
 
----
+A handler endpoint returns its own response. An `{ authenticate: true, method: 'POST' }` endpoint runs request authentication, profile resolution, and token issuance.
 
-## Separate redirect URLs
+Aurelian returns `405 method_not_allowed` for the wrong method and `404 provider_endpoint_not_found` for an unknown provider or endpoint.
 
-Register `https://auth.example.com/auth/callback/google` with Google. This **provider callback URL** is always derived as `${issuer}/callback/${providerKey}` and receives Google's code.
+Code exposes `POST /<key>/request`. Passkey owns `POST registration/start`, `POST registration/verify`, `GET authentication/start`, and `POST authentication/verify` beneath `/<key>`.
 
-The **client return URL** is `https://app.example.com/signed-in` in this example. Aurelian validates it through `redirectURIs`, then sends its own one-time authorization code there after resolving the identity.
-
----
-
-## Handle scopes
-
-Google always requests `openid`, `email`, and `profile`. It appends `GoogleOptions.scopes`, then request scopes supplied to `/authorize/google?scope=...`, removing duplicates while preserving first occurrence.
-
-Aurelian rejects a request scope string longer than 2,048 characters. The Google implementation otherwise forwards scope values; application code must restrict sensitive scopes before requests reach the handler.
-
----
-
-## Read Google responses
-
-The factory exchanges the callback code at Google's token endpoint and calls the OIDC UserInfo endpoint with the access token. It requires `sub`, maps it to `id`, and normalizes `email`, `email_verified`, `name`, and `picture`.
-
-The full UserInfo object remains in `raw`. Aurelian does not store Google tokens or resolve application users—the factory verifies the upstream response shape, while your resolver owns account lookup and policy.
-
----
-
-## Handle failures
-
-Missing configuration throws `google_client_id_required` or `google_client_secret_required` immediately. Failed or malformed upstream responses throw `google_token_exchange_failed` or `google_identity_failed`.
-
-Provider and resolver exceptions passing through `auth.handler` are reported to `onError` and normalized to `500 internal_server_error`. If the callback lacks a code or valid state, Aurelian returns `400 callback_invalid` rather than redirecting to the client return URL.
+Both start routes return `{ options, state }`, and both verify routes accept `{ response, state }`. Authentication verify issues Aurelian tokens through its provider endpoint.
 
 ---
 
 ## Follow the routes
 
-OAuth runs through `GET /authorize/:provider`, `GET /callback/:provider`, then `POST /token`. Aurelian validates the return URL and S256 PKCE challenge, creates upstream state, consumes it at callback, resolves the profile, and issues a one-time code.
+Authorization runs through `GET /:provider/authorize`, `GET /:provider/callback`, then `POST /token`. `createAuth` validates the supplied client return URI as HTTP(S), binds it into one-time provider state and the authorization code, and requires the same URI during PKCE exchange.
 
-Request authentication runs through `POST /authenticate/:provider`, resolves the returned identity, and returns tokens directly. Unknown or mismatched provider types return `404 provider_not_found`.
+Direct authentication runs through `POST /:provider/authenticate`, resolves the returned identity, and returns tokens. Unknown or mismatched provider types return `404 provider_not_found`.
 
 ---
 
 ## Test failures
 
-Stub a provider or `fetch`, then send standard `Request` objects through `auth.handler`. Assert exact callback derivation, merged scopes, normalized identity, malformed input, upstream failures, resolver failures, unknown providers, and request-provider rejection.
+Stub `fetch` for upstream providers, then send standard `Request` objects through `auth.handler`. Assert callback derivation, merged scopes, normalized identities, malformed input, upstream failures, resolver failures, unknown providers, and expected rejections.
 
-Run the complete OAuth sequence twice to prove state and authorization-code replay fail when storage is atomic. Continue with [Storage](/storage), [Profiles](/profiles), and [Errors](/errors).
+Run complete authorization sequences twice to prove state and authorization-code replay fail with atomic storage. Continue with [Storage](/storage), [Profiles](/profiles), and [Errors](/errors).

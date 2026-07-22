@@ -17,7 +17,15 @@
     ".": "./dist/index.mjs",
     "./client": "./dist/client.mjs",
     "./profiles": "./dist/profiles.mjs",
+    "./providers/code": "./dist/providers/code.mjs",
+    "./providers/credentials": "./dist/providers/credentials.mjs",
+    "./providers/discord": "./dist/providers/discord.mjs",
+    "./providers/github": "./dist/providers/github.mjs",
     "./providers/google": "./dist/providers/google.mjs",
+    "./providers/oauth": "./dist/providers/oauth.mjs",
+    "./providers/oidc": "./dist/providers/oidc.mjs",
+    "./providers/passkey": "./dist/providers/passkey.mjs",
+    "./providers/twitch": "./dist/providers/twitch.mjs",
     "./server": "./dist/server.mjs",
     "./storage": "./dist/storage/index.mjs",
     "./storage/cloudflare-kv": "./dist/storage/cloudflare-kv.mjs",
@@ -44,6 +52,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^13.3.2",
     "@standard-schema/spec": "^1.1.0",
     "jose": "^6.2.3"
   }

@@ -17,15 +17,14 @@ Aurelian is ESM and requires `Request`, `Response`, `URL`, `fetch`, Web Crypto, 
 
 ## Register Google
 
-Create an OAuth web client in Google Cloud. Set its authorized redirect URI to `http://localhost:3000/auth/callback/google`.
+Create an OAuth web client in Google Cloud. Set its authorized redirect URI to `http://localhost:3000/auth/google/callback`.
 
-This **upstream provider callback** is derived from the issuer and provider key: `${issuer}/callback/${providerKey}`. It is different from the **client return URL** allowed by `redirectURIs`.
+This **upstream provider callback** is derived from the issuer and provider key: `${issuer}/${providerKey}/callback`. It is different from the **client return URI** supplied by the browser client.
 
 Set these environment values and keep credentials and private keys out of source control:
 
 ```dotenv
 AUTH_ISSUER=http://localhost:3000/auth
-AUTH_REDIRECT_URI=http://localhost:5173/auth/callback
 AUTH_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
 AUTH_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
 GOOGLE_CLIENT_ID=your-client-id
@@ -46,20 +45,6 @@ import { google } from 'aurelian/providers/google'
 import { memoryStorage } from 'aurelian/storage/memory'
 import { z } from 'zod'
 
-declare const environment: Record<string, string | undefined>
-
-function requireEnvironment(name: string): string {
-  const value = environment[name]
-
-  if (!value) {
-    throw new Error(`Missing environment variable: ${name}`)
-  }
-
-  return value.replaceAll('\\n', '\n')
-}
-
-const issuer = requireEnvironment('AUTH_ISSUER')
-const clientReturnURL = requireEnvironment('AUTH_REDIRECT_URI')
 const profiles = defineProfiles({
   user: z.object({
     email: z.email().optional(),
@@ -68,15 +53,14 @@ const profiles = defineProfiles({
 })
 
 export const auth = createAuth({
-  issuer,
+  issuer: process.env.AUTH_ISSUER,
   profiles,
   providers: {
     google: google({
-      clientId: requireEnvironment('GOOGLE_CLIENT_ID'),
-      clientSecret: requireEnvironment('GOOGLE_CLIENT_SECRET')
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET
     })
   },
-  redirectURIs: [clientReturnURL],
   resolve({ profile, response }) {
     return profile('user', {
       email: response.data.email,
@@ -85,8 +69,8 @@ export const auth = createAuth({
   },
   signing: {
     algorithm: 'ES256',
-    privateKey: requireEnvironment('AUTH_PRIVATE_KEY'),
-    publicKey: requireEnvironment('AUTH_PUBLIC_KEY')
+    privateKey: process.env.AUTH_PRIVATE_KEY,
+    publicKey: process.env.AUTH_PUBLIC_KEY
   },
   storage: memoryStorage()
 })
@@ -137,7 +121,9 @@ const authorization = await authClient.authorize({
 globalThis.location.assign(authorization.url)
 ```
 
-The client return URL must exactly match an entry in `redirectURIs`. Aurelian validates it before redirecting to Google.
+`createClient({ redirectURI })` adds the client return URI to the authorization request. You can instead pass `redirectURI` to `authorize()` when each request needs a different return page.
+
+`createAuth` accepts only HTTP(S) return URIs, then binds the supplied value into one-time provider state and the authorization code. The PKCE token exchange must send the same URI.
 
 ---
 
@@ -158,3 +144,5 @@ const userId = result.claims.sub
 ```
 
 Store refresh tokens in protected storage and replace the complete token pair after refresh. Continue with [Setup](/setup), [Providers](/provider-flows), [Client](/client), and [Security](/security).
+
+For direct sign-in, continue with [Code](/code) or [Credentials](/credentials).

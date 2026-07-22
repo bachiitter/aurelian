@@ -23,14 +23,7 @@ export type OAuthStorage = {
   setItem(key: string, value: string): void;
 };
 
-export type PKCEChallenge = {
-  challenge: string;
-  method: 'S256';
-  verifier: string;
-};
-
 export type AuthorizeResult = {
-  challenge: PKCEChallenge;
   state: string;
   url: URL;
 };
@@ -51,11 +44,11 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
       provider: string,
       body: Body,
     ): Promise<TokenResponse> {
-      return postToken(request, `${issuer}/authenticate/${provider}`, body);
+      return postToken(request, `${issuer}/${provider}/authenticate`, body);
     },
     async authorize(input: AuthorizeOptions): Promise<AuthorizeResult> {
       const state = input.state ?? createRandomString(32);
-      const url = new URL(`${issuer}/authorize/${input.provider}`);
+      const url = new URL(`${issuer}/${input.provider}/authorize`);
       const challenge = await createPKCEChallenge();
       const redirectURI = input.redirectURI ?? options.redirectURI;
       const storage = options.storage ?? globalThis.sessionStorage;
@@ -70,15 +63,14 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
 
       const transactionKey = `${transactionPrefix}:${state}`;
 
-      if (
-        storage.getItem(`${transactionKey}:verifier`) !== null ||
-        storage.getItem(`${transactionKey}:redirect-uri`) !== null
-      ) {
+      if (storage.getItem(transactionKey) !== null) {
         throw new Error('oauth_state_in_use');
       }
 
-      storage.setItem(`${transactionKey}:verifier`, challenge.verifier);
-      storage.setItem(`${transactionKey}:redirect-uri`, redirectURI);
+      storage.setItem(
+        transactionKey,
+        JSON.stringify({ codeVerifier: challenge.verifier, redirectURI }),
+      );
 
       url.searchParams.set('redirect_uri', redirectURI);
       url.searchParams.set('state', state);
@@ -90,7 +82,7 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
       url.searchParams.set('code_challenge', challenge.challenge);
       url.searchParams.set('code_challenge_method', challenge.method);
 
-      return { challenge, state, url };
+      return { state, url };
     },
     async exchange(input: {
       code: string;
@@ -121,15 +113,32 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
       }
 
       const transactionKey = `${transactionPrefix}:${state}`;
-      const codeVerifier = storage.getItem(`${transactionKey}:verifier`);
-      const redirectURI = storage.getItem(`${transactionKey}:redirect-uri`);
+      const storedTransaction = storage.getItem(transactionKey);
 
-      if (!codeVerifier || !redirectURI) {
+      if (!storedTransaction) {
         throw new Error('oauth_state_invalid');
       }
 
-      storage.removeItem(`${transactionKey}:verifier`);
-      storage.removeItem(`${transactionKey}:redirect-uri`);
+      storage.removeItem(transactionKey);
+
+      let transaction: unknown;
+
+      try {
+        transaction = JSON.parse(storedTransaction);
+      } catch {
+        throw new Error('oauth_state_invalid');
+      }
+
+      if (
+        typeof transaction !== 'object' ||
+        transaction === null ||
+        !('codeVerifier' in transaction) ||
+        typeof transaction.codeVerifier !== 'string' ||
+        !('redirectURI' in transaction) ||
+        typeof transaction.redirectURI !== 'string'
+      ) {
+        throw new Error('oauth_state_invalid');
+      }
 
       if (providerError) {
         throw new Error('oauth_provider_error');
@@ -141,8 +150,8 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
 
       return postToken(request, `${issuer}/token`, {
         code,
-        codeVerifier,
-        redirectURI,
+        codeVerifier: transaction.codeVerifier,
+        redirectURI: transaction.redirectURI,
       });
     },
     async refresh(input: { refreshToken: string }): Promise<TokenResponse> {
@@ -193,7 +202,7 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
   };
 }
 
-export async function createPKCEChallenge(): Promise<PKCEChallenge> {
+async function createPKCEChallenge() {
   const verifier = createRandomString(64);
 
   return {

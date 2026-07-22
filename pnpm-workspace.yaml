@@ -1,11 +1,12 @@
 packages:
   - 'packages/*'
   - docs
-  - examples
+  - 'examples/*/*'
 allowBuilds:
   esbuild: true
   protobufjs: true
   sharp: true
+  workerd: true
 catalog:
   '@cloudflare/workers-types': ^4.20260516.1
   '@total-typescript/tsconfig': ^1.0.4

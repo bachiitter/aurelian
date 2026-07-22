@@ -14,6 +14,7 @@ export type {
   IssueInput,
   OAuthProvider,
   Provider,
+  ProviderEndpoint,
   RequestProvider,
   Session,
   TokenResponse,

@@ -1,8 +1,8 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import { exportPKCS8, exportSPKI, generateKeyPair } from 'jose';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { createHash, createRandomString } from './crypto.js';
 import { createAuth } from './server.js';
-import { createPKCEChallenge } from './client.js';
 import { defineProfiles } from './profiles.js';
 import { memoryStorage } from './storage/memory.js';
 import type { TokenResponse } from './types.js';
@@ -24,7 +24,7 @@ const UserSchema: StandardSchemaV1<
       ) {
         return {
           value: {
-            id: value.id,
+            id: value.id.toLowerCase(),
             refreshed:
               'refreshed' in value && value.refreshed === true
                 ? true
@@ -78,8 +78,20 @@ describe('createAuth', () => {
             return {
               email: body.email,
               emailVerified: true,
-              id: 'user_123',
+              id: 'USER_123',
             };
+          },
+          endpoints: {
+            'authentication/verify': {
+              authenticate: true,
+              method: 'POST',
+            },
+            status: {
+              handler() {
+                return Response.json({ available: true });
+              },
+              method: 'GET',
+            },
           },
           type: 'request',
         },
@@ -96,15 +108,26 @@ describe('createAuth', () => {
       storage: memoryStorage(),
     });
     const authentication = await auth.handler(
-      jsonRequest(`${ISSUER}/authenticate/password`, {
+      jsonRequest(`${ISSUER}/password/authenticate`, {
         email: 'user@example.com',
         password: 'password',
       }),
     );
     const tokens = await readTokenResponse(authentication);
+    const providerStatus = await auth.handler(
+      new Request(`${ISSUER}/password/status`),
+    );
+    const providerAuthentication = await auth.handler(
+      jsonRequest(`${ISSUER}/password/authentication/verify`, {
+        email: 'user@example.com',
+        password: 'password',
+      }),
+    );
     const verification = await auth.verify(tokens.accessToken);
 
     expect(authentication.status).toBe(200);
+    expect(providerAuthentication.status).toBe(200);
+    await expect(providerStatus.json()).resolves.toEqual({ available: true });
     expect(verification.valid).toBe(true);
 
     if (verification.valid) {
@@ -115,16 +138,17 @@ describe('createAuth', () => {
       expect(verification.claims.sub).toBe('user_123');
     }
 
-    const rotated = await auth.refresh({ refreshToken: tokens.refreshToken });
+    const refreshResponse = await auth.handler(
+      jsonRequest(`${ISSUER}/token/refresh`, {
+        refreshToken: tokens.refreshToken,
+      }),
+    );
+    const rotated = await readTokenResponse(refreshResponse);
 
-    expect(rotated).not.toBeNull();
+    expect(refreshResponse.status).toBe(200);
     expect(
       await auth.refresh({ refreshToken: tokens.refreshToken }),
     ).toBeNull();
-
-    if (!rotated) {
-      throw new Error('refresh_failed');
-    }
 
     const rotatedVerification = await auth.verify(rotated.accessToken);
 
@@ -167,12 +191,12 @@ describe('createAuth', () => {
           type: 'oauth',
         },
       },
-      redirectURIs: [REDIRECT_URI],
       signing: { algorithm: 'ES256', privateKey, publicKey },
       storage: memoryStorage(),
     });
-    const pkce = await createPKCEChallenge();
-    const authorizeURL = new URL(`${ISSUER}/authorize/example`);
+    const codeVerifier = createRandomString(64);
+    const codeChallenge = await createHash(codeVerifier);
+    const authorizeURL = new URL(`${ISSUER}/example/authorize`);
 
     authorizeURL.searchParams.set('redirect_uri', REDIRECT_URI);
     authorizeURL.searchParams.set('state', 'client_state');
@@ -183,7 +207,7 @@ describe('createAuth', () => {
 
     expect(unprotectedAuthorization.status).toBe(400);
 
-    authorizeURL.searchParams.set('code_challenge', pkce.challenge);
+    authorizeURL.searchParams.set('code_challenge', codeChallenge);
     authorizeURL.searchParams.set('code_challenge_method', 'S256');
 
     const authorization = await auth.handler(new Request(authorizeURL));
@@ -192,7 +216,7 @@ describe('createAuth', () => {
 
     expect(authorization.status).toBe(302);
     expect(providerRedirect.searchParams.get('redirect_uri')).toBe(
-      `${ISSUER}/callback/example`,
+      `${ISSUER}/example/callback`,
     );
     expect(providerState).not.toBe('client_state');
 
@@ -200,7 +224,7 @@ describe('createAuth', () => {
       throw new Error('provider_state_missing');
     }
 
-    const callbackURL = new URL(`${ISSUER}/callback/example`);
+    const callbackURL = new URL(`${ISSUER}/example/callback`);
 
     callbackURL.searchParams.set('code', 'provider_code');
     callbackURL.searchParams.set('state', providerState);
@@ -220,7 +244,7 @@ describe('createAuth', () => {
     const exchange = await auth.handler(
       jsonRequest(`${ISSUER}/token`, {
         code: authorizationCode,
-        codeVerifier: pkce.verifier,
+        codeVerifier,
         redirectURI: REDIRECT_URI,
       }),
     );

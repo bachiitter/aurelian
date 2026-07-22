@@ -30,8 +30,23 @@ export default defineConfig({
           '/storage',
           '/custom-storage',
           '/client',
+          '/routes',
         ],
         label: 'Core Concepts',
+      },
+      {
+        items: [
+          '/google',
+          '/github',
+          '/discord',
+          '/twitch',
+          '/oauth',
+          '/oidc',
+          '/code',
+          '/credentials',
+          '/passkey-provider',
+        ],
+        label: 'Providers',
       },
       {
         items: [
