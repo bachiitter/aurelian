@@ -17,7 +17,8 @@
   "scripts": {
     "dev": "turbo run dev",
     "dev:examples": "turbo run dev --filter='aurelian-example-client-react' --filter='aurelian-example-issuer-cloudflare'",
-    "build": "turbo run build"
+    "build": "turbo run build",
+    "deploy:docs": "pnpm --filter aurelian-docs exec blume build --isolated --output static && pnpm dlx wrangler@4.111.0 deploy --assets packages/docs/.blume-verify/dist --name aurelian-docs --compatibility-date 2026-07-22"
   },
   "devDependencies": {
     "turbo": "^2.10.5"
