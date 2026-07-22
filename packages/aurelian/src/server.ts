@@ -153,14 +153,14 @@ export function createAuth<
 
     await options.storage.set(
       getStorageKey('refresh', refreshTokenHash),
-      {
+      JSON.stringify({
         createdAt: session.createdAt,
         expiresAt: session.expiresAt,
         issuer,
         profile,
         provider: input.provider,
         sessionId: session.id,
-      } satisfies RefreshTokenRecord<Profile>,
+      } satisfies RefreshTokenRecord<Profile>),
       { ttl: sessionTtl },
     );
 
@@ -189,9 +189,12 @@ export function createAuth<
     }
 
     const refreshTokenHash = await createHash(input.refreshToken);
-    const value = await options.storage.consume<RefreshTokenRecord<Profile>>(
+    const storedValue = await options.storage.consume(
       getStorageKey('refresh', refreshTokenHash),
     );
+    const value: RefreshTokenRecord<Profile> | null = storedValue
+      ? JSON.parse(storedValue)
+      : null;
 
     const now = Math.floor(Date.now() / 1000);
 
@@ -285,24 +288,6 @@ export function createAuth<
     path: string,
     requestId: string,
   ): Promise<Response> {
-    const authorizeProvider = getProviderId(path, '/authorize');
-
-    if (request.method === 'GET' && authorizeProvider) {
-      return authorize(request, authorizeProvider, requestId);
-    }
-
-    const callbackProvider = getProviderId(path, '/callback');
-
-    if (request.method === 'GET' && callbackProvider) {
-      return callback(request, callbackProvider, requestId);
-    }
-
-    const authenticationProvider = getProviderId(path, '/authenticate');
-
-    if (request.method === 'POST' && authenticationProvider) {
-      return authenticate(request, authenticationProvider, requestId);
-    }
-
     if (request.method === 'POST' && path === '/token') {
       return exchange(request, requestId);
     }
@@ -317,6 +302,58 @@ export function createAuth<
 
     if (request.method === 'GET' && path === '/.well-known/jwks.json') {
       return jsonResponse(await jwks());
+    }
+
+    const endpointMatch = path.match(
+      /^\/([A-Za-z0-9._~-]+)\/([A-Za-z0-9._~\/-]+)$/,
+    );
+
+    if (endpointMatch) {
+      const providerId = endpointMatch[1];
+      const endpointId = endpointMatch[2];
+
+      if (providerId && endpointId === 'authorize' && request.method === 'GET') {
+        return authorize(request, providerId, requestId);
+      }
+
+      if (providerId && endpointId === 'callback' && request.method === 'GET') {
+        return callback(request, providerId, requestId);
+      }
+
+      if (
+        providerId &&
+        endpointId === 'authenticate' &&
+        request.method === 'POST'
+      ) {
+        return authenticate(request, providerId, requestId);
+      }
+
+      const provider = providerId ? options.providers[providerId] : undefined;
+      const endpoint = endpointId ? provider?.endpoints?.[endpointId] : undefined;
+
+      if (!endpoint) {
+        return errorResponse(
+          requestId,
+          'provider_endpoint_not_found',
+          404,
+          'Provider endpoint not found.',
+        );
+      }
+
+      if (request.method !== endpoint.method) {
+        return errorResponse(
+          requestId,
+          'method_not_allowed',
+          405,
+          `Use ${endpoint.method} for this provider endpoint.`,
+        );
+      }
+
+      if ('authenticate' in endpoint) {
+        return authenticate(request, providerId, requestId);
+      }
+
+      return endpoint.handler(request);
     }
 
     return errorResponse(
@@ -345,19 +382,19 @@ export function createAuth<
 
     const url = new URL(request.url);
     const redirectURI = url.searchParams.get('redirect_uri');
-    const isAllowedRedirectURI = redirectURI
-      ? URL.canParse(redirectURI) &&
-        (typeof options.redirectURIs === 'function'
-          ? await options.redirectURIs(redirectURI, request)
-          : (options.redirectURIs?.includes(redirectURI) ?? false))
-      : false;
+    const redirectURL =
+      redirectURI && URL.canParse(redirectURI) ? new URL(redirectURI) : null;
 
-    if (!redirectURI || !isAllowedRedirectURI) {
+    if (
+      !redirectURI ||
+      !redirectURL ||
+      (redirectURL.protocol !== 'https:' && redirectURL.protocol !== 'http:')
+    ) {
       return errorResponse(
         requestId,
         'redirect_uri_invalid',
         400,
-        'redirect_uri is not allowed.',
+        'redirect_uri is invalid.',
       );
     }
 
@@ -403,17 +440,17 @@ export function createAuth<
     const clientState = requestedState ?? createRandomString(32);
     const providerState = createRandomString(48);
     const providerStateHash = await createHash(providerState);
-    const callbackURL = `${issuer}/callback/${providerId}`;
+    const callbackURL = `${issuer}/${providerId}/callback`;
 
     await options.storage.set(
       getStorageKey('state', providerStateHash),
-      {
+      JSON.stringify({
         clientState,
         codeChallenge,
         issuer,
         provider: providerId,
         redirectURI,
-      } satisfies OAuthStateRecord,
+      } satisfies OAuthStateRecord),
       { ttl: OAUTH_STATE_TTL_SECONDS },
     );
 
@@ -464,9 +501,12 @@ export function createAuth<
     }
 
     const stateHash = await createHash(state);
-    const value = await options.storage.consume<OAuthStateRecord>(
+    const storedValue = await options.storage.consume(
       getStorageKey('state', stateHash),
     );
+    const value: OAuthStateRecord | null = storedValue
+      ? JSON.parse(storedValue)
+      : null;
 
     if (
       !value ||
@@ -482,7 +522,7 @@ export function createAuth<
     }
 
     const identity = await provider.callback({
-      callbackURL: `${issuer}/callback/${providerId}`,
+      callbackURL: `${issuer}/${providerId}/callback`,
       code,
       request,
       state,
@@ -498,13 +538,13 @@ export function createAuth<
 
     await options.storage.set(
       getStorageKey('code', authorizationCodeHash),
-      {
+      JSON.stringify({
         codeChallenge: value.codeChallenge,
         issuer,
         profile,
         provider: providerId,
         redirectURI: value.redirectURI,
-      } satisfies AuthorizationCodeRecord<Profile>,
+      } satisfies AuthorizationCodeRecord<Profile>),
       { ttl: AUTHORIZATION_CODE_TTL_SECONDS },
     );
 
@@ -580,9 +620,12 @@ export function createAuth<
     }
 
     const codeHash = await createHash(body.code);
-    const value = await options.storage.consume<AuthorizationCodeRecord<Profile>>(
+    const storedValue = await options.storage.consume(
       getStorageKey('code', codeHash),
     );
+    const value: AuthorizationCodeRecord<Profile> | null = storedValue
+      ? JSON.parse(storedValue)
+      : null;
 
     if (
       !value ||
@@ -684,20 +727,6 @@ export function createAuth<
   }
 
   return { handler, issue, jwks, refresh, revoke, verify };
-}
-
-function getProviderId(path: string, route: string): string | null {
-  if (!path.startsWith(`${route}/`)) {
-    return null;
-  }
-
-  const providerId = path.slice(route.length + 1);
-
-  if (!providerId || !/^[A-Za-z0-9._~-]+$/.test(providerId)) {
-    return null;
-  }
-
-  return providerId;
 }
 
 function getStorageKey(type: 'code' | 'refresh' | 'state', hash: string): string {

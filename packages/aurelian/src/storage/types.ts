@@ -1,9 +1,9 @@
 export type StorageAdapter = {
-  /** Atomically returns and deletes a value. */
-  consume<Value>(key: string): Promise<Value | null>;
-  set<Value>(
+  /** Returns and deletes a value. Use atomic storage for replay protection. */
+  consume(key: string): Promise<string | null>;
+  set(
     key: string,
-    value: Value,
+    value: string,
     options: { ttl: number },
   ): Promise<void>;
 };

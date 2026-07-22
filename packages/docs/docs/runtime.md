@@ -5,7 +5,7 @@ description: Deploy on standards-based JavaScript server environments
 
 ## Meet requirements
 
-Aurelian is an ESM package that uses `Request`, `Response`, `URL`, `fetch`, Web Crypto, and `TextEncoder`. The package has two runtime dependencies: `jose` and `@standard-schema/spec`.
+Aurelian is an ESM package that uses `Request`, `Response`, `URL`, `fetch`, Web Crypto, and `TextEncoder`. Its runtime dependencies are `jose`, `@standard-schema/spec`, and `@simplewebauthn/server`.
 
 Choose a runtime that implements those web APIs. The library does not depend on Node HTTP objects, cookies, a database client, or a framework.
 
@@ -15,7 +15,7 @@ Choose a runtime that implements those web APIs. The library does not depend on 
 
 Set `issuer` to the exact public HTTPS mount URL, including a path such as `/auth`. Only loopback hosts may use HTTP.
 
-Load PEM signing keys from a secret manager and use an algorithm that matches the keys. Set `access.audience`, use a strongly consistent shared adapter, and allow exact OAuth redirect URIs.
+Load PEM signing keys from a secret manager and use an algorithm that matches the keys. Set `access.audience`, use a strongly consistent shared adapter, and require OAuth clients to supply HTTP(S) return URIs.
 
 ---
 
@@ -26,15 +26,15 @@ Forward the original request to `auth.handler` for the issuer path. Keeping the 
 ```ts
 export default {
   async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
+    const url = new URL(request.url)
 
     if (url.pathname === '/auth' || url.pathname.startsWith('/auth/')) {
-      return auth.handler(request);
+      return auth.handler(request)
     }
 
-    return new Response('Not found', { status: 404 });
+    return new Response('Not found', { status: 404 })
   }
-};
+}
 ```
 
 Read [Mounting](/mounting) for CORS and request-ID handling.
@@ -43,9 +43,11 @@ Read [Mounting](/mounting) for CORS and request-ID handling.
 
 ## Scale storage
 
-All instances must share refresh, state, and authorization-code storage. Process-local memory fails after restart and cannot coordinate multiple instances.
+All instances must share refresh, OAuth state, authorization-code, and one-time proof storage. Passkey state and application credential data must also be shared through the callbacks configured on those providers.
 
-Workers KV is eventually consistent and the bundled adapter performs `get` followed by `delete`; concurrent consumers can both receive a value. Its `expirationTtl` also has a 60-second minimum, which the adapter enforces.
+Process-local memory fails after restart and cannot coordinate multiple instances.
+
+Use a strongly consistent backend with atomic consume semantics. On Cloudflare, route records to a Durable Object and consume them in a storage transaction rather than using eventually consistent Workers KV.
 
 ---
 

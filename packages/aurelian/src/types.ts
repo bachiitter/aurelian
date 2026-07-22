@@ -11,7 +11,21 @@ export type { ProviderIdentity } from './profiles.js';
 
 export type MaybePromise<Value> = Value | Promise<Value>;
 
-export type OAuthProvider = {
+export type ProviderEndpoint =
+  | {
+      authenticate: true;
+      method: 'POST';
+    }
+  | {
+      handler(request: Request): MaybePromise<Response>;
+      method: 'GET' | 'POST';
+    };
+
+type ProviderEndpoints = {
+  endpoints?: Record<string, ProviderEndpoint>;
+};
+
+export type OAuthProvider = ProviderEndpoints & {
   authorizationUrl(input: {
     callbackURL: string;
     request: Request;
@@ -27,7 +41,7 @@ export type OAuthProvider = {
   type: 'oauth';
 };
 
-export type RequestProvider = {
+export type RequestProvider = ProviderEndpoints & {
   authenticate(input: {
     request: Request;
   }): MaybePromise<ProviderIdentity | null>;
@@ -87,9 +101,6 @@ export type CreateAuthOptions<
   }): MaybePromise<void>;
   profiles: Profiles;
   providers: Providers;
-  redirectURIs?:
-    | readonly string[]
-    | ((redirectURI: string, request: Request) => MaybePromise<boolean>);
   refresh?: {
     resolve?(input: {
       profile: ProfilePayload<Profiles>;

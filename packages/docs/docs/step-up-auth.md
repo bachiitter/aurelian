@@ -48,7 +48,9 @@ async function createStepUpTicket(accessToken: string): Promise<{
 
   await stepUpTickets.set(
     ticket,
-    { userId: current.profile.properties.id } satisfies StepUpTicket,
+    JSON.stringify({
+      userId: current.profile.properties.id
+    } satisfies StepUpTicket),
     { ttl: 5 * 60 }
   );
 
@@ -66,7 +68,11 @@ Consume the ticket and verify the factor for its bound user. This example uses a
 
 ```ts
 import type { RequestProvider } from 'aurelian';
-import { stepUpTickets, verifyTotp } from '~/security/step-up.js';
+import {
+  parseStepUpTicket,
+  stepUpTickets,
+  verifyTotp
+} from '~/security/step-up.js';
 
 async function readStepUpBody(request: Request): Promise<{
   code: string;
@@ -96,7 +102,8 @@ export const stepUpProvider: RequestProvider = {
       return null;
     }
 
-    const stepUp = await stepUpTickets.consume<StepUpTicket>(body.ticket);
+    const storedStepUp = await stepUpTickets.consume(body.ticket)
+    const stepUp = storedStepUp ? parseStepUpTicket(storedStepUp) : null
 
     if (!stepUp || !(await verifyTotp(stepUp.userId, body.code))) {
       return null;

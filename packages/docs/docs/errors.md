@@ -37,7 +37,7 @@ Provider exceptions, resolver failures, invalid profile output, storage errors, 
 
 The Google factory throws `google_client_id_required` or `google_client_secret_required` during configuration. Its callback throws `google_token_exchange_failed` or `google_identity_failed`; handler routes report either callback failure as `500 internal_server_error` and pass the original error to `onError`.
 
-An upstream OAuth denial that returns no code reaches `/callback/:provider` as `400 callback_invalid`. The current handler does not forward that denial to the client return URL.
+An upstream OAuth denial that returns no code reaches `/:provider/callback` as `400 callback_invalid`. The current handler does not forward that denial to the client return URL.
 
 ---
 

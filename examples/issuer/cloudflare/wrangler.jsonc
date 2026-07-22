@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "aurelian-example-server",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-17",
+  "dev": {
+    "port": 8787
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AUTH_STORAGE",
+        "class_name": "AuthStorage"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "AuthStorage"
+      ]
+    }
+  ]
+}

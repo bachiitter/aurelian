@@ -86,7 +86,7 @@ export async function handleAuthRequest(request: Request): Promise<Response> {
 }
 ```
 
-Apply CORS only to the auth path and reject unexpected origins. CORS does not replace exact redirect allowlisting, provider state, or S256 PKCE.
+Apply CORS only to the auth path and reject unexpected origins. CORS does not replace HTTP(S) return URI validation, one-time provider state, or S256 PKCE.
 
 ---
 

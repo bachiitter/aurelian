@@ -50,11 +50,23 @@ export function defineProfiles<Schema extends ProfileSchema>(
   return profiles;
 }
 
-export async function validateProfile<Schema extends ProfileSchema>(
-  profile: ProfilePayload<Schema>,
+export async function validateProfile<
+  Schema extends ProfileSchema,
+  Type extends keyof Schema & string,
+>(
+  profile: {
+    properties: ProfileProperties<Schema[Type]>;
+    type: Type;
+  },
   profiles: Schema,
-): Promise<{ profile: ProfilePayload<Schema>; profileId: string }> {
-  const schema: StandardSchemaV1 | undefined = profiles[profile.type];
+): Promise<{
+  profile: {
+    properties: ProfileProperties<Schema[Type]>;
+    type: Type;
+  };
+  profileId: string;
+}> {
+  const schema = profiles[profile.type];
 
   if (!schema) {
     throw new Error('profile_type_invalid');
@@ -78,7 +90,10 @@ export async function validateProfile<Schema extends ProfileSchema>(
   }
 
   return {
-    profile,
+    profile: {
+      properties: result.value,
+      type: profile.type,
+    },
     profileId: result.value.id,
   };
 }

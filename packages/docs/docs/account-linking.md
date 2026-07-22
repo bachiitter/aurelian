@@ -66,6 +66,26 @@ type LinkIntent = {
   userId: string;
 };
 
+function parseLinkIntent(value: string): LinkIntent | null {
+  const parameters = new URLSearchParams(value)
+  const provider = parameters.get('provider')
+  const userId = parameters.get('userId')
+
+  if (!provider || !userId) {
+    return null
+  }
+
+  return { provider, userId }
+}
+
+function parseReauthenticationTicket(
+  value: string
+): ReauthenticationTicket | null {
+  const userId = new URLSearchParams(value).get('userId')
+
+  return userId ? { userId } : null
+}
+
 async function createLinkIntent(input: {
   accessToken: string;
   provider: string;
@@ -77,9 +97,12 @@ async function createLinkIntent(input: {
     throw new Error('authentication_required');
   }
 
-  const confirmation = await reauthenticationTickets.consume<
-    ReauthenticationTicket
-  >(input.reauthenticationTicket);
+  const storedConfirmation = await reauthenticationTickets.consume(
+    input.reauthenticationTicket
+  )
+  const confirmation = storedConfirmation
+    ? parseReauthenticationTicket(storedConfirmation)
+    : null
 
   if (
     !confirmation ||
@@ -92,10 +115,10 @@ async function createLinkIntent(input: {
 
   await linkIntents.set(
     state,
-    {
+    new URLSearchParams({
       provider: input.provider,
       userId: current.profile.properties.id
-    } satisfies LinkIntent,
+    }).toString(),
     { ttl: 10 * 60 }
   );
 
@@ -113,14 +136,19 @@ After a dedicated provider callback verifies `ProviderIdentity`, consume the int
 
 ```ts
 import type { ProviderIdentity } from 'aurelian';
-import { database, linkIntents } from '~/account-linking.js';
+import {
+  database,
+  linkIntents,
+  parseLinkIntent
+} from '~/account-linking.js';
 
 async function commitAccountLink(input: {
   identity: ProviderIdentity;
   provider: string;
   state: string;
 }): Promise<void> {
-  const intent = await linkIntents.consume<LinkIntent>(input.state);
+  const storedIntent = await linkIntents.consume(input.state)
+  const intent = storedIntent ? parseLinkIntent(storedIntent) : null
 
   if (!intent || intent.provider !== input.provider) {
     throw new Error('link_intent_invalid');

@@ -2,14 +2,14 @@ import type { StorageAdapter } from './types.js';
 
 type StoredValue = {
   expiresAt: number;
-  value: unknown;
+  value: string;
 };
 
 export function memoryStorage(): StorageAdapter {
   const values = new Map<string, StoredValue>();
 
   return {
-    async consume<Value>(key: string) {
+    async consume(key) {
       const stored = values.get(key);
 
       values.delete(key);
@@ -18,7 +18,7 @@ export function memoryStorage(): StorageAdapter {
         return null;
       }
 
-      return stored.value as Value;
+      return stored.value;
     },
     async set(key, value, options) {
       const now = Date.now();

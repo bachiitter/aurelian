@@ -5,3 +5,5 @@ dist
 .env*
 .turbo
 .blume/
+.wrangler
+.dev.vars

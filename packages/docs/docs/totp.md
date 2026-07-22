@@ -146,7 +146,7 @@ async function createTotpLoginTicket(input: {
 
   await loginTickets.set(
     ticket,
-    { userId: user.id } satisfies TotpLoginTicket,
+    JSON.stringify({ userId: user.id } satisfies TotpLoginTicket),
     { ttl: 5 * 60 }
   );
 
@@ -168,6 +168,7 @@ import type { RequestProvider } from 'aurelian';
 import {
   getTotpFactor,
   loginTickets,
+  parseTotpLoginTicket,
   parseTotpRequest,
   storeCounterIfGreater
 } from '~/security/totp.js';
@@ -180,7 +181,8 @@ export const totpProvider: RequestProvider = {
       return null;
     }
 
-    const login = await loginTickets.consume<TotpLoginTicket>(body.ticket);
+    const storedLogin = await loginTickets.consume(body.ticket)
+    const login = storedLogin ? parseTotpLoginTicket(storedLogin) : null
 
     if (!login) {
       return null;

@@ -8,6 +8,7 @@ const USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 export type GoogleOptions = {
   clientId: string;
   clientSecret: string;
+  fetch?: typeof fetch;
   scopes?: string[];
 };
 
@@ -91,7 +92,8 @@ export function google(options: GoogleOptions): OAuthProvider {
       return url;
     },
     async callback({ callbackURL, code }) {
-      const tokenResponse = await fetch(TOKEN_URL, {
+      const fetcher = options.fetch ?? globalThis.fetch;
+      const tokenResponse = await fetcher(TOKEN_URL, {
         body: new URLSearchParams({
           client_id: options.clientId,
           client_secret: options.clientSecret,
@@ -109,7 +111,7 @@ export function google(options: GoogleOptions): OAuthProvider {
         throw new Error('google_token_exchange_failed');
       }
 
-      const identityResponse = await fetch(USERINFO_URL, {
+      const identityResponse = await fetcher(USERINFO_URL, {
         headers: { authorization: `Bearer ${token.accessToken}` },
       });
       const identityValue: unknown = await identityResponse

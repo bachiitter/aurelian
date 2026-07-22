@@ -22,16 +22,16 @@ This boundary is deliberate: `resolve` is the only place where a normalized prov
 
 A request provider completes in one server request:
 
-1. The client posts application credentials to `/authenticate/:provider`.
+1. The client posts application credentials to `/:provider/authenticate`.
 2. The provider verifies the request and returns `ProviderIdentity` or `null`.
 3. `resolve` maps that identity to a profile from `defineProfiles`.
 4. Aurelian validates the profile, stores a hashed refresh token, and returns a token pair.
 
 OAuth adds two one-time records before the same profile and session steps:
 
-1. `/authorize/:provider` validates the redirect URI and S256 challenge, stores state, then redirects upstream.
-2. `/callback/:provider` consumes state, calls the provider callback, stores an authorization code, then redirects to the client.
-3. `/token` consumes the authorization code, checks its redirect URI and verifier, then creates the session.
+1. `/:provider/authorize` validates the client return URI as HTTP(S), binds it and the S256 challenge into provider state, then redirects upstream.
+2. `/:provider/callback` consumes state at `${issuer}/${providerKey}/callback`, calls the provider, binds the return URI into an authorization code, then redirects to the client.
+3. `/token` consumes the authorization code, requires the same return URI, checks its verifier, then creates the session.
 
 Read [Provider flows](/provider-flows) for complete implementations and [Security](/security) for the invariants behind these records.
 

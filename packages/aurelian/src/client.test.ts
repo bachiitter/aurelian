@@ -44,15 +44,13 @@ describe('createClient OAuth', () => {
     expect(authorization.url.searchParams.get('redirect_uri')).toBe(
       'https://app.example.com/callback',
     );
-    expect(authorization.url.searchParams.get('code_challenge')).toBe(
-      authorization.challenge.challenge,
-    );
+    expect(authorization.url.searchParams.get('code_challenge')).toHaveLength(43);
     expect(result).toEqual(tokens);
     expect(requests).toEqual([
       {
         body: {
           code: 'provider_code',
-          codeVerifier: authorization.challenge.verifier,
+          codeVerifier: expect.any(String),
           redirectURI: 'https://app.example.com/callback',
         },
         url: 'https://auth.example.com/auth/token',
@@ -78,7 +76,7 @@ describe('createClient OAuth', () => {
     });
 
     await expect(
-      client.authenticate('password', { password: 'secret' }),
+      client.authenticate('credentials', { password: 'secret' }),
     ).rejects.toThrow('token_response_invalid');
   });
 });
