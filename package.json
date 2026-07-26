@@ -22,7 +22,7 @@
   },
   "devDependencies": {
     "turbo": "^2.10.5",
-    "wrangler": "^4.111.0"
+    "wrangler": "^4.112.0"
   },
   "packageManager": "pnpm@11.0.0"
 }
