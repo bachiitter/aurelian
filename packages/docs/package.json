@@ -11,8 +11,5 @@
   },
   "dependencies": {
     "blume": "1.0.4"
-  },
-  "devDependencies": {
-    "typescript": "catalog:"
   }
 }

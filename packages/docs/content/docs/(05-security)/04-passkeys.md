@@ -11,13 +11,13 @@ Use SimpleWebAuthn in the browser. Aurelian's provider generates and verifies bo
 pnpm add @simplewebauthn/browser @simplewebauthn/server
 ```
 
-Configure every `PasskeyOptions` callback in the [provider reference](/passkey-provider). Developer code owns state and credential persistence, while the provider owns all four ceremony routes.
+Configure `handle`, `origin`, `rpID`, `rpName`, and `storage` in the [provider reference](/passkey-provider). `stateTtl` is optional; Aurelian owns transient challenges while application code owns credential persistence.
 
 ---
 
 ## Register a credential
 
-Start registration with an authenticated request. The provider calls `getRegistrationUser(request)` and returns `{ options, state }` for that account.
+Start registration with an authenticated request. The provider emits `registration-user` through `handle(event)` and returns `{ options, state }` for that account.
 
 ```ts
 import { startRegistration } from '@simplewebauthn/browser'
@@ -63,7 +63,7 @@ if (!verifyResponse.ok) {
 const result: { verified: true } = await verifyResponse.json()
 ```
 
-Replace the development authorization header with your normal session credentials. Registration verify consumes the state, verifies the response, and calls `saveCredential` with the identity selected at registration start.
+Replace the development authorization header with your normal session credentials and repeat its exact value during verification. Registration verify consumes the state, verifies the response, and emits `credential-created` with the identity selected at registration start.
 
 The provider requires a discoverable credential and user verification during registration. Credential IDs must be unique, and registration returns `{ verified: true }` without issuing a new Aurelian session.
 
@@ -111,17 +111,17 @@ if (!verifyResponse.ok) {
 const tokens: TokenResponse = await verifyResponse.json()
 ```
 
-The verify endpoint consumes state, loads the credential by `response.id`, verifies the assertion, and updates a non-zero counter. It then resolves the credential identity and issues Aurelian tokens through the provider endpoint.
+The verify route consumes state, emits `credential` for `response.id`, verifies the assertion, and emits `counter-update` when either counter is non-zero. It then resolves the credential identity and issues Aurelian tokens through the authentication lifecycle.
 
 ---
 
 ## Persist safely
 
-Store the `PasskeyState` registration/authentication union in shared, expiring storage and consume each value once. Bind registration state to the authenticated session at both start and verify, as shown in the [Cloudflare issuer example](https://github.com/bachiitter/aurelian/blob/main/examples/issuer/cloudflare/src/auth.ts).
+Aurelian stores each challenge through `PasskeyOptions.storage` and consumes it once. Registration state binds the selected identity to the exact `Authorization` header used at start, so verification must send the same value.
 
-Do not require an existing login session when consuming authentication state because this ceremony runs before login. Authentication still requires user verification and one-time, promptly expiring state.
+Authentication state remains unbound to a login because that ceremony starts before sign-in. Both branches require user verification and expire after `stateTtl`, which defaults to 300 seconds.
 
-Store credentials in a shared repository used by `getCredential`, `saveCredential`, and `updateCounter`. Compare and update non-zero counters atomically.
+Store credentials in a shared repository used by the `credential`, `credential-created`, and `counter-update` events. Compare the persisted counter and write the new non-zero value atomically.
 
 ---
 

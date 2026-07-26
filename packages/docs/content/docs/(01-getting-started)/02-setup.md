@@ -1,6 +1,6 @@
 ---
 title: Setup
-description: Install and configure a framework-neutral authentication service
+description: Configure a Web-compatible authentication service
 ---
 
 ## Get an overview
@@ -21,13 +21,15 @@ Aurelian accepts any [Standard Schema](https://standardschema.dev/) validator. T
 
 ## Install Aurelian
 
-Install the library and your validator. Aurelian does not require an HTTP framework or database client.
+Install the library and your validator. Aurelian uses Hono internally but does not require you to supply an HTTP framework or database client.
 
 ```bash
 pnpm add aurelian zod
 ```
 
-The package is ESM, so configure your application accordingly. Runtime dependencies include `jose`, `@standard-schema/spec`, and SimpleWebAuthn server support.
+The package is ESM, so configure your application accordingly. Runtime dependencies include Hono, `jose`, `@standard-schema/spec`, and SimpleWebAuthn server support.
+
+Built-in provider users do not need to interact with Hono. Install `hono` directly only when creating a custom provider router.
 
 ---
 
@@ -60,7 +62,6 @@ Set the exact public URL where the handler will be mounted. HTTPS is required ex
 AUTH_ISSUER=http://localhost:3000/auth
 AUTH_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
 AUTH_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
-DEMO_PASSWORD=change-this-local-password
 ```
 
 For OAuth, the browser supplies its client return URI with `createClient({ redirectURI })` or `authorize({ redirectURI })`. It is not a `createAuth` option.
@@ -71,64 +72,76 @@ Register the separate upstream provider callback `${issuer}/${providerKey}/callb
 
 ## Configure the service
 
-Create `auth.ts` with one profile, request provider, resolver, storage adapter, and signing configuration. This complete local example keeps its user in memory; replace the lookup and password comparison with application database queries and a password hasher.
+Create `auth.ts` with one profile, direct provider, resolver, storage adapter, and signing configuration. This local example keeps accounts and delivered codes in memory while Aurelian owns hashing and transient flow state.
 
 ```ts
 import { createAuth, defineProfiles } from 'aurelian'
-import { credentials } from 'aurelian/providers/credentials'
+import { password } from 'aurelian/providers/password'
+import type { PasswordAccount } from 'aurelian/providers/password'
 import { memoryStorage } from 'aurelian/storage/memory'
 import { z } from 'zod'
 
-type User = {
-  email: string
-  emailVerified: boolean
-  id: string
-}
+const accounts = new Map<string, PasswordAccount>()
+const developmentOutbox = new Map<string, string>()
+const storage = memoryStorage()
+const passwordProvider = password({
+  handle(event) {
+    switch (event.type) {
+      case 'account':
+        return accounts.get(event.identifier) ?? null
+      case 'send-code':
+        if (
+          event.purpose === 'password-reset' &&
+          !accounts.has(event.identifier)
+        ) {
+          return
+        }
 
-const demoUser: User = {
-  email: 'demo@example.com',
-  emailVerified: true,
-  id: 'user_demo'
-}
+        developmentOutbox.set(
+          `${event.purpose}:${event.identifier}`,
+          event.code
+        )
+        return
+      case 'registration': {
+        if (accounts.has(event.identifier)) {
+          return null
+        }
 
-async function verifyUserPassword(
-  email: string,
-  password: string
-): Promise<User | null> {
-  if (
-    email !== demoUser.email ||
-    password !== process.env.DEMO_PASSWORD
-  ) {
-    return null
-  }
+        const identity = {
+          email: event.identifier,
+          emailVerified: true,
+          id: crypto.randomUUID()
+        }
 
-  return demoUser
-}
+        accounts.set(event.identifier, {
+          identity,
+          passwordHash: event.passwordHash
+        })
+        return identity
+      }
+      case 'password-reset': {
+        const account = accounts.get(event.identifier)
 
-async function getUserById(id: string): Promise<User | null> {
-  return id === demoUser.id ? demoUser : null
-}
+        if (!account) {
+          return
+        }
 
-const credentialsProvider = credentials({
-  schema: z.object({
-    email: z.email(),
-    password: z.string().min(1).max(1024)
-  }),
-  async verify({ credentials }) {
-    const user = await verifyUserPassword(
-      credentials.email,
-      credentials.password
-    )
-
-    if (!user) {
-      return null
+        accounts.set(event.identifier, {
+          ...account,
+          passwordHash: event.passwordHash
+        })
+        return
+      }
     }
-
-    return {
-      email: user.email,
-      emailVerified: user.emailVerified,
-      id: user.id
-    }
+  },
+  normalizeIdentifier(identifier) {
+    return identifier.trim().toLowerCase()
+  },
+  storage,
+  validatePassword(value) {
+    return value.length >= 12
+      ? null
+      : 'Use at least 12 characters.'
   }
 })
 
@@ -142,17 +155,15 @@ const profiles = defineProfiles({
 export const auth = createAuth({
   issuer: process.env.AUTH_ISSUER,
   profiles,
-  providers: { credentials: credentialsProvider },
-  async resolve({ profile, response }) {
-    const user = await getUserById(response.data.id)
-
-    if (!user) {
-      throw new Error('user_not_found')
+  providers: { password: passwordProvider },
+  resolve({ profile, response }) {
+    if (!response.data.email) {
+      throw new Error('email_required')
     }
 
     return profile('user', {
-      email: user.email,
-      id: user.id
+      email: response.data.email,
+      id: response.data.id
     })
   },
   signing: {
@@ -160,11 +171,11 @@ export const auth = createAuth({
     privateKey: process.env.AUTH_PRIVATE_KEY,
     publicKey: process.env.AUTH_PUBLIC_KEY
   },
-  storage: memoryStorage()
+  storage
 })
 ```
 
-The credentials provider runs Standard Schema validation before delegating application checks to `verify`. The resolver reloads canonical application data, selects a profile, and lets Aurelian validate that profile before signing.
+The provider emits one of four events for application-owned lookup, delivery, registration, or hash replacement. Replace both maps with account storage and an email or messaging service before production.
 
 `memoryStorage()` is suitable only for development and tests. Production storage must be shared by every instance and implement atomic `consume`; see [Storage](/storage) and [Custom storage](/custom-storage).
 
@@ -172,7 +183,7 @@ The credentials provider runs Standard Schema validation before delegating appli
 
 ## Integrate the handler
 
-`auth.handler` has a framework-neutral web contract: one standard request in and one standard response out.
+`auth.handler` has a Web-compatible contract: one standard request in and one standard response out. Hono stays internal unless you author a custom provider.
 
 ```ts
 import { auth } from './auth.js'
@@ -206,7 +217,7 @@ Keep the public origin and `/auth` path intact when forwarding requests. Aurelia
 
 ## Verify the service
 
-Call the handler directly to confirm that the public key is available without depending on a framework adapter.
+Call the handler directly to confirm that the public key is available without depending on a runtime adapter.
 
 ```ts
 import { auth } from './auth.js'
@@ -222,9 +233,9 @@ if (!response.ok) {
 const jwks: unknown = await response.json()
 ```
 
-Then send a `POST` request to `/auth/credentials/authenticate` with the local credentials. Successful authentication returns `accessToken`, `refreshToken`, `expiresIn`, and `tokenType: "Bearer"`.
+Start registration at `/auth/password/registration/start`, then verify its delivered code at `/auth/password/registration/verify`. Verification returns `accessToken`, `refreshToken`, `expiresIn`, and `tokenType: "Bearer"`.
 
-Read [Credentials](/credentials) for flexible input shapes and production password guidance.
+Read [Password](/password) for every route and production security guidance. Use low-level [Credentials](/credentials) only for arbitrary Standard Schema proofs whose workflow the application fully owns.
 
 ---
 

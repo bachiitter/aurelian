@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { discord } from './discord.js';
 import { github } from './github.js';
 import { twitch } from './twitch.js';
+import { createProviderTestApp } from './test-utils.js';
 
 const callbackInput = {
   callbackURL: 'https://auth.example.com/provider/callback',
@@ -35,8 +36,10 @@ describe('social providers', () => {
         return Response.json({ id: 123, login: 'octocat' });
       },
     });
+    const app = createProviderTestApp(provider, { callback: callbackInput });
+    const response = await app.request('/callback');
 
-    await expect(provider.callback(callbackInput)).resolves.toMatchObject({
+    await expect(response.json()).resolves.toMatchObject({
       email: 'user@example.com',
       emailVerified: true,
       id: '123',
@@ -58,8 +61,10 @@ describe('social providers', () => {
               verified: true,
             }),
     });
+    const app = createProviderTestApp(provider, { callback: callbackInput });
+    const response = await app.request('/callback');
 
-    await expect(provider.callback(callbackInput)).resolves.toMatchObject({
+    await expect(response.json()).resolves.toMatchObject({
       email: 'user@example.com',
       emailVerified: true,
       id: '123',
@@ -85,8 +90,10 @@ describe('social providers', () => {
               ],
             }),
     });
+    const app = createProviderTestApp(provider, { callback: callbackInput });
+    const response = await app.request('/callback');
 
-    await expect(provider.callback(callbackInput)).resolves.toMatchObject({
+    await expect(response.json()).resolves.toMatchObject({
       email: 'user@example.com',
       id: '123',
       name: 'Twitch User',

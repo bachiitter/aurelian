@@ -25,6 +25,7 @@
     "./providers/oauth": "./dist/providers/oauth.mjs",
     "./providers/oidc": "./dist/providers/oidc.mjs",
     "./providers/passkey": "./dist/providers/passkey.mjs",
+    "./providers/password": "./dist/providers/password.mjs",
     "./providers/twitch": "./dist/providers/twitch.mjs",
     "./server": "./dist/server.mjs",
     "./storage": "./dist/storage/index.mjs",
@@ -54,6 +55,7 @@
   "dependencies": {
     "@simplewebauthn/server": "^13.3.2",
     "@standard-schema/spec": "^1.1.0",
+    "hono": "^4.12.30",
     "jose": "^6.2.3"
   }
 }

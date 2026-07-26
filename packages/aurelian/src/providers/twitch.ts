@@ -1,4 +1,4 @@
-import type { OAuthProvider } from '../types.js';
+import type { Provider } from '../types.js';
 import { oauth } from './oauth.js';
 
 export type TwitchOptions = {
@@ -8,7 +8,7 @@ export type TwitchOptions = {
   scopes?: string[];
 };
 
-export function twitch(options: TwitchOptions): OAuthProvider {
+export function twitch(options: TwitchOptions): Provider {
   return oauth({
     authorizationURL: 'https://id.twitch.tv/oauth2/authorize',
     clientId: options.clientId,

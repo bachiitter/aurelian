@@ -39,7 +39,7 @@ Supply `fetch` when requests need credentials, tracing, or a test transport.
 
 ## Send request credentials
 
-Call `authenticate` with a request-provider name and its JSON-serializable body.
+Call `authenticate` with a provider key whose router defines `POST /authenticate` and its JSON-serializable body.
 
 ```ts
 const tokens = await authClient.authenticate('credentials', {
@@ -48,13 +48,15 @@ const tokens = await authClient.authenticate('credentials', {
 })
 ```
 
-The generic body is not validated by the client. The provider must parse it and return `null` for an expected rejection.
+The generic body is not validated by the client. The provider route must parse it and pass its identity or `null` to Aurelian's lifecycle helper.
+
+This helper also works with `authenticate('password', { identifier, password })`. Use `fetch` for the password provider's registration and reset routes.
 
 ---
 
-## Call named endpoints
+## Call extra routes
 
-Use `fetch` for provider-owned operations. The route shape is `/:provider/:endpoint` beneath the issuer path and supports nested endpoint keys.
+Use `fetch` for provider-owned operations. Each provider router defines its own methods and relative paths beneath `/:provider`.
 
 ```ts
 const codeResponse = await fetch(
@@ -66,14 +68,26 @@ const codeResponse = await fetch(
   }
 )
 
+const registrationResponse = await fetch(
+  'https://auth.example.com/auth/password/registration/start',
+  {
+    body: JSON.stringify({
+      identifier: 'user@example.com',
+      password: 'correct-horse-battery-staple'
+    }),
+    headers: { 'content-type': 'application/json' },
+    method: 'POST'
+  }
+)
+
 const passkeyResponse = await fetch(
   'https://auth.example.com/auth/passkey/authentication/start'
 )
 ```
 
-Each endpoint declares `GET` or `POST`, and the server rejects the other method. Providers may expose any number of named endpoints.
+Built-in provider users do not need to interact with Hono. Custom provider authors define these routes directly with Hono.
 
-Use `authenticate('code', { identifier, code })` after requesting delivery. Passkey instead submits `{ response, state }` to `POST /passkey/authentication/verify`, which issues tokens through that provider endpoint.
+Use `authenticate('code', { identifier, code })` after requesting delivery. Password registration verification and passkey authentication verification also issue tokens through their dedicated routes.
 
 ---
 

@@ -5,6 +5,7 @@ import {
 } from 'jose';
 import { describe, expect, it } from 'vitest';
 import { oidc } from './oidc.js';
+import { createProviderTestApp } from './test-utils.js';
 
 describe('oidc', () => {
   it('discovers endpoints and verifies the ID token and UserInfo subject', async () => {
@@ -61,17 +62,19 @@ describe('oidc', () => {
       },
       issuer,
     });
-    const authorization = await provider.authorizationUrl({
-      callbackURL: 'https://auth.example.com/oidc/callback',
-      request: new Request('https://auth.example.com'),
-      state: 'state_123',
+    const app = createProviderTestApp(provider, {
+      callback: {
+        callbackURL: 'https://auth.example.com/oidc/callback',
+        code: 'code_123',
+        state: 'state_123',
+      },
     });
-    const identity = await provider.callback({
-      callbackURL: 'https://auth.example.com/oidc/callback',
-      code: 'code_123',
-      request: new Request('https://auth.example.com'),
-      state: 'state_123',
-    });
+    const authorizationResponse = await app.request('/authorize');
+    const authorizationResult: { url: string } =
+      await authorizationResponse.json();
+    const authorization = new URL(authorizationResult.url);
+    const callbackResponse = await app.request('/callback');
+    const identity = await callbackResponse.json();
 
     expect(authorization.searchParams.get('nonce')).toBe('state_123');
     expect(identity).toMatchObject({

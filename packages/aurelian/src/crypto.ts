@@ -130,6 +130,17 @@ export function createTokenService<Profile>(options: {
           algorithms: [options.algorithm],
           audience: options.audience,
           issuer,
+          requiredClaims: [
+            'exp',
+            'iat',
+            'jti',
+            'nbf',
+            'profile',
+            'sid',
+            'sub',
+            'typ',
+          ],
+          typ: 'JWT',
         });
 
         if (

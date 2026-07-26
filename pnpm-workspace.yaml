@@ -16,6 +16,11 @@ minimumReleaseAge: 7200
 minimumReleaseAgeExclude:
   - 'orphos'
   - 'sst'
+publicHoistPattern:
+  - '@astrojs/mdx'
+  - '@shikijs/twoslash'
+  - '@tailwindcss/vite'
+  - 'astro'
 registries:
   "@jsr": https://npm.jsr.io/
   default: https://registry.npmjs.org/

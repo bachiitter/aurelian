@@ -1,3 +1,4 @@
+import { Hono } from 'hono';
 import {
   createHash,
   createRandomString,
@@ -14,7 +15,9 @@ import type {
   Auth,
   CreateAuthOptions,
   IssueInput,
+  OAuthFlow,
   Provider,
+  ProviderEnvironment,
   Session,
   TokenResponse,
   VerifyResult,
@@ -239,144 +242,18 @@ export function createAuth<
     return tokenService.jwks();
   }
 
-  async function handler(request: Request): Promise<Response> {
-    const suppliedRequestId = request.headers.get('x-request-id');
-    const requestId =
-      suppliedRequestId && suppliedRequestId.length <= 128
-        ? suppliedRequestId
-        : createRandomString(24);
-
-    try {
-      const requestURL = new URL(request.url);
-      const path =
-        requestURL.origin === issuerURL.origin &&
-        issuerPath &&
-        (requestURL.pathname === issuerPath ||
-          requestURL.pathname.startsWith(`${issuerPath}/`))
-          ? requestURL.pathname.slice(issuerPath.length) || '/'
-          : requestURL.pathname;
-      const response = await route(request, path, requestId);
-      const headers = new Headers(response.headers);
-
-      headers.set('x-request-id', requestId);
-
-      return new Response(response.body, {
-        headers,
-        status: response.status,
-        statusText: response.statusText,
-      });
-    } catch (error) {
-      if (options.onError) {
-        try {
-          await options.onError(error, { request, requestId });
-        } catch {
-          // The auth response must not depend on application error reporting.
-        }
-      }
-
-      return errorResponse(
-        requestId,
-        'internal_server_error',
-        500,
-        'Internal server error.',
-      );
-    }
-  }
-
-  async function route(
-    request: Request,
-    path: string,
-    requestId: string,
-  ): Promise<Response> {
-    if (request.method === 'POST' && path === '/token') {
-      return exchange(request, requestId);
-    }
-
-    if (request.method === 'POST' && path === '/token/refresh') {
-      return refreshRoute(request, requestId);
-    }
-
-    if (request.method === 'POST' && path === '/token/revoke') {
-      return revokeRoute(request, requestId);
-    }
-
-    if (request.method === 'GET' && path === '/.well-known/jwks.json') {
-      return jsonResponse(await jwks());
-    }
-
-    const endpointMatch = path.match(
-      /^\/([A-Za-z0-9._~-]+)\/([A-Za-z0-9._~\/-]+)$/,
-    );
-
-    if (endpointMatch) {
-      const providerId = endpointMatch[1];
-      const endpointId = endpointMatch[2];
-
-      if (providerId && endpointId === 'authorize' && request.method === 'GET') {
-        return authorize(request, providerId, requestId);
-      }
-
-      if (providerId && endpointId === 'callback' && request.method === 'GET') {
-        return callback(request, providerId, requestId);
-      }
-
-      if (
-        providerId &&
-        endpointId === 'authenticate' &&
-        request.method === 'POST'
-      ) {
-        return authenticate(request, providerId, requestId);
-      }
-
-      const provider = providerId ? options.providers[providerId] : undefined;
-      const endpoint = endpointId ? provider?.endpoints?.[endpointId] : undefined;
-
-      if (!endpoint) {
-        return errorResponse(
-          requestId,
-          'provider_endpoint_not_found',
-          404,
-          'Provider endpoint not found.',
-        );
-      }
-
-      if (request.method !== endpoint.method) {
-        return errorResponse(
-          requestId,
-          'method_not_allowed',
-          405,
-          `Use ${endpoint.method} for this provider endpoint.`,
-        );
-      }
-
-      if ('authenticate' in endpoint) {
-        return authenticate(request, providerId, requestId);
-      }
-
-      return endpoint.handler(request);
-    }
-
-    return errorResponse(
-      requestId,
-      'route_not_found',
-      404,
-      'Auth route not found.',
-    );
-  }
-
   async function authorize(
     request: Request,
     providerId: string,
     requestId: string,
+    flow: OAuthFlow,
   ): Promise<Response> {
-    const provider = getProvider(providerId);
-
-    if (!provider || provider.type !== 'oauth') {
+    if (request.method !== 'GET') {
       return errorResponse(
         requestId,
-        'provider_not_found',
+        'route_not_found',
         404,
-        'OAuth provider not found.',
+        'Auth route not found.',
       );
     }
 
@@ -454,7 +331,7 @@ export function createAuth<
       { ttl: OAUTH_STATE_TTL_SECONDS },
     );
 
-    const authorizationURL = await provider.authorizationUrl({
+    const authorizationURL = await flow.authorizationUrl({
       callbackURL,
       request,
       scopes: scope?.split(' ').filter(Boolean),
@@ -475,15 +352,14 @@ export function createAuth<
     request: Request,
     providerId: string,
     requestId: string,
+    flow: OAuthFlow,
   ): Promise<Response> {
-    const provider = getProvider(providerId);
-
-    if (!provider || provider.type !== 'oauth') {
+    if (request.method !== 'GET') {
       return errorResponse(
         requestId,
-        'provider_not_found',
+        'route_not_found',
         404,
-        'OAuth provider not found.',
+        'Auth route not found.',
       );
     }
 
@@ -521,7 +397,7 @@ export function createAuth<
       );
     }
 
-    const identity = await provider.callback({
+    const identity = await flow.callback({
       callbackURL: `${issuer}/${providerId}/callback`,
       code,
       request,
@@ -560,19 +436,9 @@ export function createAuth<
     request: Request,
     providerId: string,
     requestId: string,
+    identityValue: PromiseLike<ProviderIdentity | null> | ProviderIdentity | null,
   ): Promise<Response> {
-    const provider = getProvider(providerId);
-
-    if (!provider || provider.type !== 'request') {
-      return errorResponse(
-        requestId,
-        'provider_not_found',
-        404,
-        'Authentication provider not found.',
-      );
-    }
-
-    const identity = await provider.authenticate({ request });
+    const identity = await identityValue;
 
     if (!identity) {
       return errorResponse(
@@ -722,8 +588,144 @@ export function createAuth<
     return jsonResponse({ revoked: true });
   }
 
-  function getProvider(providerId: string): Provider | undefined {
-    return options.providers[providerId];
+  const app = createRouter();
+
+  function createRouter(): Hono<ProviderEnvironment> {
+    const router = new Hono<ProviderEnvironment>({
+      getPath(request) {
+        const requestURL = new URL(request.url);
+
+        if (
+          requestURL.origin !== issuerURL.origin ||
+          !issuerPath ||
+          (requestURL.pathname !== issuerPath &&
+            !requestURL.pathname.startsWith(`${issuerPath}/`))
+        ) {
+          return requestURL.pathname;
+        }
+
+        return requestURL.pathname.slice(issuerPath.length) || '/';
+      },
+    });
+
+    router.use('*', async (context, next) => {
+      const suppliedRequestId = context.req.header('x-request-id');
+      const requestId =
+        suppliedRequestId && suppliedRequestId.length <= 128
+          ? suppliedRequestId
+          : createRandomString(24);
+
+      context.set('requestId', requestId);
+      await next();
+      context.header('x-request-id', requestId);
+    });
+
+    router.onError((error, context) => {
+      const requestId = context.var.requestId ?? createRandomString(24);
+
+      return createInternalErrorResponse(
+        error,
+        context.req.raw,
+        requestId,
+      );
+    });
+
+    router.notFound((context) =>
+      errorResponse(
+        context.var.requestId,
+        'route_not_found',
+        404,
+        'Auth route not found.',
+      ),
+    );
+    router.post('/token', (context) =>
+      exchange(context.req.raw, context.var.requestId),
+    );
+    router.post('/token/refresh', (context) =>
+      refreshRoute(context.req.raw, context.var.requestId),
+    );
+    router.post('/token/revoke', (context) =>
+      revokeRoute(context.req.raw, context.var.requestId),
+    );
+    router.get('/.well-known/jwks.json', async () => jsonResponse(await jwks()));
+
+    for (const [providerId, provider] of Object.entries(options.providers)) {
+      if (!/^[A-Za-z0-9._~-]+$/.test(providerId)) {
+        throw new Error(`provider_id_invalid:${providerId}`);
+      }
+
+      const providerRouter = new Hono<ProviderEnvironment>();
+
+      providerRouter.use('*', async (context, next) => {
+        context.set('aurelian', {
+          authenticate: (identity) =>
+            authenticate(
+              context.req.raw,
+              providerId,
+              context.var.requestId,
+              identity,
+            ),
+          authorize: (flow) =>
+            authorize(
+              context.req.raw,
+              providerId,
+              context.var.requestId,
+              flow,
+            ),
+          callback: (flow) =>
+            callback(
+              context.req.raw,
+              providerId,
+              context.var.requestId,
+              flow,
+            ),
+          providerId,
+        });
+        await next();
+      });
+      providerRouter.route('/', provider.router);
+      router.route(`/${providerId}`, providerRouter);
+    }
+
+    return router;
+  }
+
+  async function handler(request: Request): Promise<Response> {
+    try {
+      return await app.fetch(request);
+    } catch (error) {
+      const suppliedRequestId = request.headers.get('x-request-id');
+      const requestId =
+        suppliedRequestId && suppliedRequestId.length <= 128
+          ? suppliedRequestId
+          : createRandomString(24);
+
+      return createInternalErrorResponse(error, request, requestId);
+    }
+  }
+
+  async function createInternalErrorResponse(
+    error: unknown,
+    request: Request,
+    requestId: string,
+  ): Promise<Response> {
+    if (options.onError) {
+      try {
+        await options.onError(error, { request, requestId });
+      } catch {
+        // The auth response must not depend on application error reporting.
+      }
+    }
+
+    const response = errorResponse(
+      requestId,
+      'internal_server_error',
+      500,
+      'Internal server error.',
+    );
+
+    response.headers.set('x-request-id', requestId);
+    return response;
   }
 
   return { handler, issue, jwks, refresh, revoke, verify };

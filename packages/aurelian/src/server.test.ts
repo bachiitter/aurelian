@@ -1,11 +1,16 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
+import { Hono } from 'hono';
 import { exportPKCS8, exportSPKI, generateKeyPair } from 'jose';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createHash, createRandomString } from './crypto.js';
 import { createAuth } from './server.js';
 import { defineProfiles } from './profiles.js';
 import { memoryStorage } from './storage/memory.js';
-import type { TokenResponse } from './types.js';
+import type {
+  OAuthFlow,
+  ProviderEnvironment,
+  TokenResponse,
+} from './types.js';
 
 const ISSUER = 'https://auth.example.com/auth';
 const REDIRECT_URI = 'https://app.example.com/callback';
@@ -54,6 +59,38 @@ beforeAll(async () => {
 
 describe('createAuth', () => {
   it('issues, rotates, verifies, and revokes an application-owned session', async () => {
+    const passwordRouter = new Hono<ProviderEnvironment>();
+    async function authenticate(request: Request) {
+      const body: {
+        email?: unknown;
+        password?: unknown;
+      } = await request.json();
+
+      if (
+        body.email !== 'user@example.com' ||
+        body.password !== 'password'
+      ) {
+        return null;
+      }
+
+      return {
+        email: body.email,
+        emailVerified: true,
+        id: 'USER_123',
+      };
+    }
+
+    passwordRouter.post('/authenticate', (context) =>
+      context.var.aurelian.authenticate(authenticate(context.req.raw)),
+    );
+    passwordRouter.post('/authentication/verify', (context) =>
+      context.var.aurelian.authenticate(authenticate(context.req.raw)),
+    );
+    passwordRouter.get('/status', (context) =>
+      context.json({ available: true }),
+    );
+    passwordRouter.get('/failure', () => Promise.reject('provider_failed'));
+
     const auth = createAuth({
       resolve({ profile, response }) {
         return profile('user', { id: response.data.id });
@@ -61,40 +98,7 @@ describe('createAuth', () => {
       issuer: ISSUER,
       profiles,
       providers: {
-        password: {
-          async authenticate({ request }) {
-            const body: {
-              email?: unknown;
-              password?: unknown;
-            } = await request.json();
-
-            if (
-              body.email !== 'user@example.com' ||
-              body.password !== 'password'
-            ) {
-              return null;
-            }
-
-            return {
-              email: body.email,
-              emailVerified: true,
-              id: 'USER_123',
-            };
-          },
-          endpoints: {
-            'authentication/verify': {
-              authenticate: true,
-              method: 'POST',
-            },
-            status: {
-              handler() {
-                return Response.json({ available: true });
-              },
-              method: 'GET',
-            },
-          },
-          type: 'request',
-        },
+        password: { router: passwordRouter },
       },
       refresh: {
         resolve({ profile }) {
@@ -123,10 +127,14 @@ describe('createAuth', () => {
         password: 'password',
       }),
     );
+    const providerFailure = await auth.handler(
+      new Request(`${ISSUER}/password/failure`),
+    );
     const verification = await auth.verify(tokens.accessToken);
 
     expect(authentication.status).toBe(200);
     expect(providerAuthentication.status).toBe(200);
+    expect(providerFailure.status).toBe(500);
     await expect(providerStatus.json()).resolves.toEqual({ available: true });
     expect(verification.valid).toBe(true);
 
@@ -169,6 +177,28 @@ describe('createAuth', () => {
   });
 
   it('exchanges an OAuth callback with isolated state and PKCE', async () => {
+    const exampleRouter = new Hono<ProviderEnvironment>();
+    const flow: OAuthFlow = {
+      authorizationUrl({ callbackURL, state }) {
+        const url = new URL('https://provider.example.com/authorize');
+
+        url.searchParams.set('redirect_uri', callbackURL);
+        url.searchParams.set('state', state);
+
+        return url;
+      },
+      callback() {
+        return { id: 'oauth_user' };
+      },
+    };
+
+    exampleRouter.get('/authorize', (context) =>
+      context.var.aurelian.authorize(flow),
+    );
+    exampleRouter.get('/callback', (context) =>
+      context.var.aurelian.callback(flow),
+    );
+
     const auth = createAuth({
       resolve({ profile, response }) {
         return profile('user', { id: response.data.id });
@@ -176,20 +206,7 @@ describe('createAuth', () => {
       issuer: ISSUER,
       profiles,
       providers: {
-        example: {
-          authorizationUrl({ callbackURL, state }) {
-            const url = new URL('https://provider.example.com/authorize');
-
-            url.searchParams.set('redirect_uri', callbackURL);
-            url.searchParams.set('state', state);
-
-            return url;
-          },
-          callback() {
-            return { id: 'oauth_user' };
-          },
-          type: 'oauth',
-        },
+        example: { router: exampleRouter },
       },
       signing: { algorithm: 'ES256', privateKey, publicKey },
       storage: memoryStorage(),
@@ -229,10 +246,14 @@ describe('createAuth', () => {
     callbackURL.searchParams.set('code', 'provider_code');
     callbackURL.searchParams.set('state', providerState);
 
+    const headCallback = await auth.handler(
+      new Request(callbackURL, { method: 'HEAD' }),
+    );
     const callback = await auth.handler(new Request(callbackURL));
     const clientRedirect = new URL(getLocation(callback));
     const authorizationCode = clientRedirect.searchParams.get('code');
 
+    expect(headCallback.status).toBe(404);
     expect(callback.status).toBe(302);
     expect(clientRedirect.origin + clientRedirect.pathname).toBe(REDIRECT_URI);
     expect(clientRedirect.searchParams.get('state')).toBe('client_state');

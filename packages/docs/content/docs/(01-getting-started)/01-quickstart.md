@@ -145,4 +145,4 @@ const userId = result.claims.sub
 
 Store refresh tokens in protected storage and replace the complete token pair after refresh. Continue with [Setup](/setup), [Providers](/provider-flows), [Client](/client), and [Security](/security).
 
-For direct sign-in, continue with [Code](/code) or [Credentials](/credentials).
+For direct sign-in, continue with [Code](/code), [Password](/password), or low-level [Credentials](/credentials).

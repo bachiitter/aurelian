@@ -173,6 +173,17 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
         const result = await jwtVerify(accessToken, jwks, {
           audience: options.audience,
           issuer,
+          requiredClaims: [
+            'exp',
+            'iat',
+            'jti',
+            'nbf',
+            'profile',
+            'sid',
+            'sub',
+            'typ',
+          ],
+          typ: 'JWT',
         });
         if (
           result.payload.typ !== 'access' ||

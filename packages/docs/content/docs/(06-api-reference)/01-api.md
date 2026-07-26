@@ -17,6 +17,7 @@ description: Review every public export, route, and contract
 | `aurelian/providers/oauth` | `oauth` |
 | `aurelian/providers/oidc` | `oidc` |
 | `aurelian/providers/passkey` | `passkey` |
+| `aurelian/providers/password` | `password`, `pbkdf2PasswordHasher` |
 | `aurelian/providers/twitch` | `twitch` |
 | `aurelian/profiles` | `defineProfiles`, `validateProfile` |
 | `aurelian/server` | `createAuth` |
@@ -25,6 +26,8 @@ description: Review every public export, route, and contract
 | `aurelian/storage/memory` | `memoryStorage` |
 
 The package also exports `aurelian/package.json`. All JavaScript entry points are ESM.
+
+The root exposes `createAuth` and `defineProfiles` as runtime values. Provider factories and helpers, including `password` and `pbkdf2PasswordHasher`, are available only from their provider subpaths.
 
 ---
 
@@ -110,6 +113,8 @@ type Auth<Profile> = {
 ## Define providers
 
 ```ts
+import type { Hono } from 'hono'
+
 type ProviderIdentity = {
   avatarUrl?: string
   email?: string
@@ -120,25 +125,27 @@ type ProviderIdentity = {
   username?: string
 }
 
-type ProviderEndpoint =
-  | {
-      authenticate: true
-      method: 'POST'
-    }
-  | {
-      handler(request: Request): Response | Promise<Response>
-      method: 'GET' | 'POST'
-    }
-
-type RequestProvider = {
-  authenticate(input: {
-    request: Request
-  }): ProviderIdentity | null | Promise<ProviderIdentity | null>
-  endpoints?: Record<string, ProviderEndpoint>
-  type: 'request'
+type Provider = {
+  router: Hono<ProviderEnvironment>
 }
 
-type OAuthProvider = {
+type ProviderLifecycle = {
+  authenticate(
+    identity: ProviderIdentity | null | Promise<ProviderIdentity | null>
+  ): Promise<Response>
+  authorize(flow: OAuthFlow): Promise<Response>
+  callback(flow: OAuthFlow): Promise<Response>
+  providerId: string
+}
+
+type ProviderEnvironment = {
+  Variables: {
+    aurelian: ProviderLifecycle
+    requestId: string
+  }
+}
+
+type OAuthFlow = {
   authorizationUrl(input: {
     callbackURL: string
     request: Request
@@ -151,22 +158,20 @@ type OAuthProvider = {
     request: Request
     state: string
   }): ProviderIdentity | Promise<ProviderIdentity>
-  endpoints?: Record<string, ProviderEndpoint>
-  type: 'oauth'
 }
-
-type Provider = OAuthProvider | RequestProvider
 ```
 
-Provider map keys may contain letters, numbers, `.`, `_`, `~`, and `-`. Endpoint keys support the same characters plus `/` for nested routes such as `registration/start`.
+Provider map keys may contain letters, numbers, `.`, `_`, `~`, and `-`. Each router defines its own explicit relative paths and methods.
 
-Each endpoint is mounted at `/:provider/:endpoint` beneath the issuer path, including every nested key segment. Aurelian enforces its declared method, returning `405 method_not_allowed` for a mismatch and `404 provider_endpoint_not_found` when no endpoint exists.
+`createAuth` mounts each `provider.router` under its map key with `app.route`. The parent router supplies `providerId`, `authenticate`, `authorize`, and `callback` through `context.var.aurelian`.
+
+Custom provider authors must install and import `hono`. Built-in provider users do not need to interact with Hono.
 
 ---
 
 ## Configure social sign-in
 
-Each social factory returns an `OAuthProvider`. Import its value and option type from the matching subpath.
+Each social factory returns a `Provider`. Import its value and option type from the matching subpath.
 
 ```ts
 type GoogleOptions = {
@@ -237,7 +242,7 @@ type OAuthOptions = {
 }
 ```
 
-`oauth(options)` returns an `OAuthProvider` and throws `oauth_client_credentials_required` for empty credentials. Omitted scopes default to none, and omitted token authentication defaults to `client_secret_basic`.
+`oauth(options)` returns a `Provider` and throws `oauth_client_credentials_required` for empty credentials. Omitted scopes default to none, and omitted token authentication defaults to `client_secret_basic`.
 
 Basic authentication form-encodes the client ID and secret before joining them with `:` and Base64-encoding the result. Set `client_secret_post` explicitly to place both credentials in the form body.
 
@@ -262,7 +267,7 @@ type OIDCOptions = {
 }
 ```
 
-`oidc(options)` returns an `OAuthProvider`. It discovers required authorization, token, and JWKS endpoints plus an optional UserInfo endpoint from `${issuer}/.well-known/openid-configuration`.
+`oidc(options)` returns a `Provider`. It discovers required authorization, token, and JWKS endpoints plus an optional UserInfo endpoint from `${issuer}/.well-known/openid-configuration`.
 
 Authorization always includes `openid`, `email`, and `profile`, and binds the nonce to provider state. Token authentication supports `client_secret_basic` and explicit `client_secret_post`, with Basic as the default.
 
@@ -295,14 +300,7 @@ type CodeOptions = {
   ttl?: number
 }
 
-type CodeProvider = RequestProvider & {
-  endpoints: {
-    request: {
-      handler(request: Request): Response | Promise<Response>
-      method: 'POST'
-    }
-  }
-}
+type CodeProvider = Provider
 ```
 
 `code(options)` returns `CodeProvider`. `identify`, `send`, and `storage` are required; `ttl` defaults to 300 seconds.
@@ -327,9 +325,87 @@ type CredentialsOptions<Schema extends StandardSchemaV1> = {
 }
 ```
 
-`credentials(options)` returns `RequestProvider`. It validates the request body with the supplied Standard Schema before passing its output to `verify`.
+`credentials(options)` returns a low-level `Provider`. Its router validates one arbitrary request body with the supplied Standard Schema before passing its output to `verify`.
 
-The accepted JSON may have any shape represented by the schema. See [Credentials](/credentials) for a complete Zod example.
+It does not provide registration, reset, code delivery, or hashing. See [Credentials](/credentials) for a complete Zod example or [Password](/password) for the full account workflow.
+
+---
+
+## Configure account secrets
+
+Import both runtime values and all types from `aurelian/providers/password`.
+
+```ts
+type PasswordHasher = {
+  hash(password: string): string | Promise<string>
+  verify(
+    password: string,
+    passwordHash: string
+  ): boolean | Promise<boolean>
+}
+
+type PasswordAccount = {
+  identity: ProviderIdentity
+  passwordHash: string
+}
+
+type PasswordProviderEvent =
+  | {
+      identifier: string
+      request: Request
+      type: 'account'
+    }
+  | {
+      code: string
+      identifier: string
+      purpose: 'password-reset' | 'registration'
+      request: Request
+      type: 'send-code'
+    }
+  | {
+      identifier: string
+      passwordHash: string
+      request: Request
+      type: 'registration'
+    }
+  | {
+      identifier: string
+      passwordHash: string
+      request: Request
+      type: 'password-reset'
+    }
+
+type PasswordProviderResult =
+  | PasswordAccount
+  | ProviderIdentity
+  | boolean
+  | null
+  | void
+
+type PasswordOptions = {
+  codeTtl?: number
+  handle(event: PasswordProviderEvent):
+    | PasswordProviderResult
+    | Promise<PasswordProviderResult>
+  hasher?: PasswordHasher
+  normalizeIdentifier?(identifier: string): string
+  resetTtl?: number
+  storage: StorageAdapter
+  validatePassword?(password: string):
+    | string
+    | null
+    | void
+    | Promise<string | null | void>
+}
+```
+
+`password(options)` returns a `Provider`. `account` returns a `PasswordAccount` or `null`, `registration` returns the new identity, and `send-code` plus `password-reset` perform application-owned side effects.
+
+The default hasher is `pbkdf2PasswordHasher()` with 600,000 PBKDF2-SHA-256 iterations. Pass `{ iterations }` to tune it, or supply another `PasswordHasher` through `hasher`.
+
+`codeTtl` and `resetTtl` default to 600 seconds. The provider stores and consumes transient registration and reset state through `storage`, while the application persists account records and hashes.
+
+`POST /<key>/authenticate` and `POST /<key>/registration/verify` issue tokens. The four other registration and reset routes return state or completion JSON without creating a session.
 
 ---
 
@@ -342,94 +418,70 @@ type PasskeyCredential = WebAuthnCredential & {
   identity: ProviderIdentity
 }
 
-type PasskeyState =
+type PasskeyRegistrationUser = {
+  displayName?: string
+  excludeCredentials?: Array<{
+    id: string
+    transports?: AuthenticatorTransportFuture[]
+  }>
+  identity: ProviderIdentity
+  name: string
+}
+
+type PasskeyProviderEvent =
   | {
-      challenge: string
-      identity: ProviderIdentity
-      type: 'registration'
+      id: string
+      type: 'credential'
     }
   | {
-      challenge: string
-      type: 'authentication'
+      credential: WebAuthnCredential
+      identity: ProviderIdentity
+      request: Request
+      type: 'credential-created'
+    }
+  | {
+      credentialId: string
+      currentCounter: number
+      newCounter: number
+      type: 'counter-update'
+    }
+  | {
+      request: Request
+      type: 'registration-user'
     }
 
+type PasskeyProviderResult =
+  | PasskeyCredential
+  | PasskeyRegistrationUser
+  | boolean
+  | null
+  | void
+
 type PasskeyOptions = {
-  consumeState(input: {
-    request: Request
-    state: string
-  }): PasskeyState | null | Promise<PasskeyState | null>
-  createState(input: {
-    request: Request
-    value: PasskeyState
-  }): string | Promise<string>
-  getCredential(id: string):
-    | PasskeyCredential
-    | null
-    | Promise<PasskeyCredential | null>
-  getRegistrationUser(request: Request):
-    | {
-        displayName?: string
-        excludeCredentials?: Array<{
-          id: string
-          transports?: AuthenticatorTransportFuture[]
-        }>
-        identity: ProviderIdentity
-        name: string
-      }
-    | null
-    | Promise<{
-        displayName?: string
-        excludeCredentials?: Array<{
-          id: string
-          transports?: AuthenticatorTransportFuture[]
-        }>
-        identity: ProviderIdentity
-        name: string
-      } | null>
+  handle(event: PasskeyProviderEvent):
+    | PasskeyProviderResult
+    | Promise<PasskeyProviderResult>
   origin: string
   rpID: string
   rpName: string
-  saveCredential(input: {
-    credential: WebAuthnCredential
-    identity: ProviderIdentity
-    request: Request
-  }): void | Promise<void>
-  updateCounter(input: {
-    credentialId: string
-    currentCounter: number
-    newCounter: number
-  }): boolean | Promise<boolean>
+  stateTtl?: number
+  storage: StorageAdapter
 }
 
-type PasskeyProvider = RequestProvider & {
-  endpoints: {
-    'authentication/start': {
-      handler(request: Request): Response | Promise<Response>
-      method: 'GET'
-    }
-    'authentication/verify': {
-      authenticate: true
-      method: 'POST'
-    }
-    'registration/start': {
-      handler(request: Request): Response | Promise<Response>
-      method: 'POST'
-    }
-    'registration/verify': {
-      handler(request: Request): Response | Promise<Response>
-      method: 'POST'
-    }
-  }
-}
+type PasskeyProvider = Provider
 ```
 
-`passkey(options)` returns `PasskeyProvider`. Registration start calls `getRegistrationUser(request)` and returns `{ options, state }`; registration verify accepts `{ response, state }` and calls `saveCredential` after verification.
+`passkey(options)` returns `PasskeyProvider`. Registration start emits `registration-user` and returns `{ options, state }`; registration verification emits `credential-created` after a successful ceremony.
 
-Registration requires a discoverable credential and user verification. Bind its state to the authenticated session that started the ceremony.
+Registration requires a discoverable credential and user verification. Aurelian stores transient challenge state, binds registration state to the exact start-request `Authorization` header, and consumes it once.
 
-Authentication start returns `{ options, state }` and must work before login. Authentication verify requires user verification, accepts `{ response, state }`, resolves the credential identity, and issues Aurelian tokens through `POST /<key>/authentication/verify`.
+Authentication start returns `{ options, state }` and must work before login. Authentication verification emits `credential`, verifies the assertion, emits `counter-update` for non-zero counters, and issues tokens through `POST /<key>/authentication/verify`.
 
-All nine `PasskeyOptions` fields shown above are required. Developer code owns state and credential persistence; see [Passkey provider](/passkey-provider) for the complete setup.
+Return `true` from `counter-update` only after an atomic compare-and-update succeeds. Always-zero authenticators skip that event.
+
+These are the only four passkey routes; there is no `POST /<key>/authenticate` alias. The five fields other than `stateTtl` are required, and its default is 300 seconds.
+
+Application code owns credential persistence. See [Passkey provider](/passkey-provider) for the complete setup.
 
 ---
 
@@ -563,10 +615,7 @@ Paths are beneath the normalized issuer path.
 
 | Method | Path | Input | Success |
 | --- | --- | --- | --- |
-| `GET` | `/:provider/authorize` | `redirect_uri`, `state?`, `scope?`, `code_challenge`, `code_challenge_method=S256` | `302` to provider |
-| `GET` | `/:provider/callback` | `code`, provider `state` | `302` to client return URI |
-| `POST` | `/:provider/authenticate` | Provider-defined request | `TokenResponse` |
-| `GET` or `POST` | `/:provider/:endpoint` | Endpoint-defined request | Endpoint-defined response |
+| Provider-defined | `/:provider/*` | Router-defined request | Router-defined response |
 | `POST` | `/token` | `{ code, codeVerifier, redirectURI }` | `TokenResponse` |
 | `POST` | `/token/refresh` | `{ refreshToken }` | `TokenResponse` |
 | `POST` | `/token/revoke` | `{ refreshToken }` | `{ revoked: true }` |
@@ -574,7 +623,7 @@ Paths are beneath the normalized issuer path.
 
 Authorization scope is one space-delimited string limited to 2,048 characters. Callback code is limited to 4,096 characters, and state must contain 1–512 characters.
 
-The client return URI and upstream provider callback serve different hops. Register `${issuer}/${providerKey}/callback` with the upstream provider; send the client return URI to `/:provider/authorize`.
+Built-in OAuth routers define `GET /authorize` and `GET /callback`, while credentials, code, password, and passkey define the routes listed in [HTTP routes](/routes). Register `${issuer}/${providerKey}/callback` with an upstream provider; send the client return URI to `/:provider/authorize`.
 
 State and authorization codes are consumed before later validation or provider work. Review [Security](/security) before implementing custom storage or low-level exchange.
 
@@ -670,8 +719,10 @@ The response also sets `x-request-id`. See [Errors](/errors) for codes and clien
 
 ## Import shared types
 
-The root exports `AccessTokenClaims`, `Auth`, `CreateAuthOptions`, `IssueInput`, `OAuthProvider`, `Provider`, `ProviderEndpoint`, `RequestProvider`, `Session`, `TokenResponse`, and `VerifyResult`. It also exports the profile types listed above.
+The root exports `AccessTokenClaims`, `Auth`, `CreateAuthOptions`, `IssueInput`, `OAuthFlow`, `Provider`, `ProviderEnvironment`, `ProviderLifecycle`, `Session`, `TokenResponse`, and `VerifyResult`. It also exports the profile types listed above.
 
 `aurelian/client` exports `AuthorizeOptions`, `AuthorizeResult`, `CreateClientOptions`, `OAuthStorage`, `TokenResponse`, and `VerifyResult`. Use `import type` for every type-only import.
 
-Provider subpaths export their factory-specific types: `CodeOptions` and `CodeProvider`; `CredentialsOptions`; `DiscordOptions`; `GitHubOptions`; `GoogleOptions`; `OAuthIdentityInput` and `OAuthOptions`; `OIDCOptions`; `PasskeyCredential`, `PasskeyOptions`, `PasskeyProvider`, and `PasskeyState`; and `TwitchOptions`.
+Provider subpaths export their factory-specific types: `CodeOptions` and `CodeProvider`; `CredentialsOptions`; `DiscordOptions`; `GitHubOptions`; `GoogleOptions`; `OAuthIdentityInput` and `OAuthOptions`; and `OIDCOptions`.
+
+The password subpath exports `PasswordAccount`, `PasswordHasher`, `PasswordOptions`, `PasswordProviderEvent`, and `PasswordProviderResult`. The passkey subpath exports `PasskeyCredential`, `PasskeyOptions`, `PasskeyProvider`, `PasskeyProviderEvent`, `PasskeyProviderResult`, `PasskeyRegistrationUser`, and `PasskeyState`; the Twitch subpath exports `TwitchOptions`.

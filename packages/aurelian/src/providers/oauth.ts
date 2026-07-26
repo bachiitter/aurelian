@@ -1,5 +1,6 @@
 import type { ProviderIdentity } from '../profiles.js';
-import type { MaybePromise, OAuthProvider } from '../types.js';
+import type { MaybePromise, Provider } from '../types.js';
+import { createOAuthProvider } from './router.js';
 
 export type OAuthIdentityInput = {
   accessToken: string;
@@ -20,14 +21,14 @@ export type OAuthOptions = {
   tokenURL: string;
 };
 
-export function oauth(options: OAuthOptions): OAuthProvider {
+export function oauth(options: OAuthOptions): Provider {
   if (!options.clientId || !options.clientSecret) {
     throw new Error('oauth_client_credentials_required');
   }
 
   const fetcher = options.fetch ?? globalThis.fetch;
 
-  return {
+  return createOAuthProvider({
     authorizationUrl({ callbackURL, scopes, state }) {
       const url = new URL(options.authorizationURL);
       const requestedScopes = new Set([
@@ -101,6 +102,5 @@ export function oauth(options: OAuthOptions): OAuthProvider {
         token,
       });
     },
-    type: 'oauth',
-  };
+  });
 }

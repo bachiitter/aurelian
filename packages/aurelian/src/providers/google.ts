@@ -1,4 +1,5 @@
-import type { OAuthProvider, ProviderIdentity } from '../types.js';
+import type { Provider, ProviderIdentity } from '../types.js';
+import { createOAuthProvider } from './router.js';
 
 const AUTHORIZATION_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const DEFAULT_SCOPES = ['openid', 'email', 'profile'] as const;
@@ -63,7 +64,7 @@ function parseIdentity(value: unknown): ProviderIdentity | null {
   };
 }
 
-export function google(options: GoogleOptions): OAuthProvider {
+export function google(options: GoogleOptions): Provider {
   if (!options.clientId) {
     throw new Error('google_client_id_required');
   }
@@ -74,7 +75,7 @@ export function google(options: GoogleOptions): OAuthProvider {
 
   const configuredScopes = options.scopes ?? [];
 
-  return {
+  return createOAuthProvider({
     authorizationUrl({ callbackURL, scopes, state }) {
       const url = new URL(AUTHORIZATION_URL);
       const requestedScopes = new Set([
@@ -125,6 +126,5 @@ export function google(options: GoogleOptions): OAuthProvider {
 
       return identity;
     },
-    type: 'oauth',
-  };
+  });
 }

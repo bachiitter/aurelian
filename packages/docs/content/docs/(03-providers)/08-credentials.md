@@ -1,13 +1,13 @@
 ---
 title: Credentials
-description: Validate flexible sign-in data before application verification
+description: Validate arbitrary proofs with a Standard Schema
 ---
 
 ## Define the input
 
-Import `credentials` and `CredentialsOptions` from `aurelian/providers/credentials`. Supply a Standard Schema validator for the JSON shape your application accepts.
+`credentials` is a low-level provider for one arbitrary JSON proof validated by a Standard Schema. It is not the full [Password](/password) account provider and does not add registration, reset, code delivery, hashing, or transient state.
 
-This complete local example uses an email and password, but the schema may describe any shape. Replace the direct password comparison with a database lookup and password hasher in production.
+Import `credentials` and `CredentialsOptions` from `aurelian/providers/credentials`. The complete local example uses an email and password, but the schema may describe any application-owned proof.
 
 ```ts
 import { createAuth, defineProfiles } from 'aurelian'
@@ -81,7 +81,7 @@ Aurelian parses the request body as unknown input and runs Standard Schema valid
 
 ---
 
-## HTTP routes
+## Call the route
 
 The `credentials` map key creates this provider-first path beneath the issuer. Rename the key to rename the path.
 
@@ -111,12 +111,14 @@ const tokens = await authClient.authenticate('credentials', {
 
 This posts to `POST /credentials/authenticate`. Schema validation issues or a `null` result from `verify` become `401 authentication_failed`.
 
-A returned identity passes through the profile resolver before tokens are issued. The factory returns a `RequestProvider` and exposes no named endpoints.
+A returned identity passes through the profile resolver before tokens are issued. The factory returns a `Provider` whose router defines only `POST /authenticate`.
+
+Built-in users do not need to import or configure Hono.
 
 ---
 
 ## Protect secrets
 
-Use Argon2id, bcrypt, or another password hasher when the schema includes a password. Keep account lookup, lockout policy, hash migration, and audit logging in `verify`.
+Use [Password](/password) when Aurelian should provide account, registration, verification, reset, and hashing mechanics. Choose `credentials` only when your application owns the complete workflow around the submitted proof.
 
-Return the same failure for unknown accounts and invalid proofs. Add request and account-level rate limits outside the provider.
+If that proof contains a password, hash it with Argon2id, bcrypt, or another suitable algorithm in `verify`. Return the same failure for unknown accounts and invalid proofs, then add request and account-level rate limits outside the provider.

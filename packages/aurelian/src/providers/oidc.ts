@@ -3,7 +3,8 @@ import {
   customFetch,
   jwtVerify,
 } from 'jose';
-import type { OAuthProvider } from '../types.js';
+import type { Provider } from '../types.js';
+import { createOAuthProvider } from './router.js';
 
 export type OIDCOptions = {
   clientId: string;
@@ -14,7 +15,7 @@ export type OIDCOptions = {
   tokenEndpointAuthMethod?: 'client_secret_basic' | 'client_secret_post';
 };
 
-export function oidc(options: OIDCOptions): OAuthProvider {
+export function oidc(options: OIDCOptions): Provider {
   if (!options.clientId || !options.clientSecret) {
     throw new Error('oidc_client_credentials_required');
   }
@@ -52,8 +53,23 @@ export function oidc(options: OIDCOptions): OAuthProvider {
           : undefined,
     };
   })();
+  let jwks: ReturnType<typeof createRemoteJWKSet> | undefined;
 
-  return {
+  async function getJWKS(): Promise<ReturnType<typeof createRemoteJWKSet>> {
+    if (jwks) {
+      return jwks;
+    }
+
+    const metadata = await metadataPromise;
+
+    jwks = createRemoteJWKSet(
+      new URL(metadata.jwksURL),
+      options.fetch ? { [customFetch]: options.fetch } : undefined,
+    );
+    return jwks;
+  }
+
+  return createOAuthProvider({
     async authorizationUrl({ callbackURL, scopes, state }) {
       const metadata = await metadataPromise;
       const url = new URL(metadata.authorizationURL);
@@ -75,7 +91,10 @@ export function oidc(options: OIDCOptions): OAuthProvider {
       return url;
     },
     async callback({ callbackURL, code, state }) {
-      const metadata = await metadataPromise;
+      const [metadata, remoteJwks] = await Promise.all([
+        metadataPromise,
+        getJWKS(),
+      ]);
       const body = new URLSearchParams({
         code,
         grant_type: 'authorization_code',
@@ -117,11 +136,7 @@ export function oidc(options: OIDCOptions): OAuthProvider {
         throw new Error('oidc_token_exchange_failed');
       }
 
-      const jwks = createRemoteJWKSet(
-        new URL(metadata.jwksURL),
-        options.fetch ? { [customFetch]: options.fetch } : undefined,
-      );
-      const idToken = await jwtVerify(token.id_token, jwks, {
+      const idToken = await jwtVerify(token.id_token, remoteJwks, {
         audience: options.clientId,
         issuer,
         requiredClaims: ['exp', 'iat', 'sub'],
@@ -193,6 +208,5 @@ export function oidc(options: OIDCOptions): OAuthProvider {
             : undefined,
       };
     },
-    type: 'oauth',
-  };
+  });
 }
