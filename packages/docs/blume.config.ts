@@ -6,6 +6,7 @@ export default defineConfig({
   },
   deployment: {
     output: "static",
+    adapter: "cloudflare",
   },
   title: "Aurelian",
   description: "Small authentication primitives for apps that own users.",
