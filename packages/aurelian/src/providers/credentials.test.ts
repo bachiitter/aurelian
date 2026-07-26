@@ -1,6 +1,7 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import { describe, expect, it } from 'vitest';
 import { credentials } from './credentials.js';
+import { createProviderTestApp } from './test-utils.js';
 
 const CredentialsSchema: StandardSchemaV1<
   unknown,
@@ -36,12 +37,13 @@ describe('credentials', () => {
           : null;
       },
     });
-    const request = new Request('https://auth.example.com', {
+    const app = createProviderTestApp(provider);
+    const response = await app.request('/authenticate', {
       body: JSON.stringify({ email: 'user@example.com', password: 'secret' }),
       method: 'POST',
     });
 
-    await expect(provider.authenticate({ request })).resolves.toEqual({
+    await expect(response.json()).resolves.toEqual({
       email: 'user@example.com',
       id: 'user_123',
     });

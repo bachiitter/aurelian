@@ -13,7 +13,7 @@ Every path below sits beneath the configured issuer. For `https://auth.example.c
 
 ## Compare providers
 
-Routes are created from each `providers` map key and always place that key before the operation. These examples assume the issuer is `https://auth.example.com/auth`.
+`createAuth` mounts each provider router under its `providers` map key. These examples assume the issuer is `https://auth.example.com/auth`.
 
 | Provider | Map key | HTTP routes | Purpose |
 | --- | --- | --- | --- |
@@ -25,9 +25,10 @@ Routes are created from each `providers` map key and always place that key befor
 | Generic OIDC | `work` | `GET /work/authorize`<br />`GET /work/callback` | Start the discovered OIDC flow and receive its upstream callback |
 | Credentials | `credentials` | `POST /credentials/authenticate` | Validate the configured schema and issue tokens |
 | Code | `code` | `POST /code/request`<br />`POST /code/authenticate` | Deliver a code, then verify it and issue tokens |
+| Password | `password` | `POST /password/authenticate`<br />`POST /password/registration/start`<br />`POST /password/registration/verify`<br />`POST /password/password-reset/start`<br />`POST /password/password-reset/verify`<br />`POST /password/password-reset/complete` | Sign in, register, or reset an account password |
 | Passkey | `passkey` | `POST /passkey/registration/start`<br />`POST /passkey/registration/verify`<br />`GET /passkey/authentication/start`<br />`POST /passkey/authentication/verify` | Register a credential or authenticate with one |
 
-Provider keys allow letters, numbers, `.`, `_`, `~`, and `-`. Nested endpoint keys may also contain `/`, which creates paths such as `/passkey/registration/start`.
+Provider keys allow letters, numbers, `.`, `_`, `~`, and `-`. Each router defines explicit relative paths such as `/registration/start`.
 
 ---
 
@@ -118,7 +119,7 @@ void startAuthorization()
 
 `createAuth` binds the exact return URI and challenge to one-time provider state. It later binds the same URI to the Aurelian authorization code.
 
-Invalid query fields return `400`, while an unknown or non-OAuth provider returns `404 provider_not_found`.
+Invalid query fields return `400`. A provider without `GET /authorize`, including an unknown key, returns `404 route_not_found`.
 
 ---
 
@@ -223,7 +224,7 @@ The token request requires string `code`, `codeVerifier`, and `redirectURI` fiel
 
 ## Send a proof
 
-Post a request provider's exact body to its provider-first authentication path. Credentials are provider-defined; this example receives `200 TokenResponse` or `401 authentication_failed`.
+Post the low-level credentials provider's configured Standard Schema shape to its authentication path. This example receives `200 TokenResponse` or `401 authentication_failed`.
 
 ```ts
 import type { TokenResponse } from 'aurelian'
@@ -247,13 +248,32 @@ if (!response.ok) {
 export const tokens: TokenResponse = await response.json()
 ```
 
-Only request providers can use `/:provider/authenticate`. An unknown provider or an OAuth provider at this path returns `404 provider_not_found`.
+Only routers that explicitly define `POST /authenticate` respond at this path. A missing key, path, or method returns `404 route_not_found`.
+
+---
+
+## Run account flows
+
+Use the password provider when the application owns accounts but Aurelian should run sign-in, registration, verification-code, reset, and hashing mechanics. These paths assume the provider key is `password`.
+
+| Method | Path | Exact request | Success | Tokens |
+| --- | --- | --- | --- | --- |
+| `POST` | `/password/authenticate` | `{ identifier, password }` | `TokenResponse` | Yes |
+| `POST` | `/password/registration/start` | `{ identifier, password }` | `{ state }` | No |
+| `POST` | `/password/registration/verify` | `{ code, state }` | `TokenResponse` | Yes |
+| `POST` | `/password/password-reset/start` | `{ identifier }` | `{ state }` | No |
+| `POST` | `/password/password-reset/verify` | `{ code, state }` | `{ state }` | No |
+| `POST` | `/password/password-reset/complete` | `{ password, state }` | `{ reset: true }` | No |
+
+Registration verification and reset verification consume their state before checking the code. Reset completion consumes its state before password validation, so any failed attempt must restart the relevant flow.
+
+Read [Password](/password) for the handler events, persistence boundary, and enumeration guidance.
 
 ---
 
 ## Verify a code
 
-Request delivery from the code provider's named endpoint, then authenticate with the same identifier and the six-digit value. The request endpoint returns `204` by default, though a custom `send` callback may return another response.
+Request delivery from the code provider's `/request` route, then authenticate with the same identifier and the six-digit value. The request route returns `204` by default, though a custom `send` callback may return another response.
 
 ```ts
 import type { TokenResponse } from 'aurelian'
@@ -293,12 +313,16 @@ Use these provider-owned nested paths with `@simplewebauthn/browser`. The [Passk
 
 | Method | Path | Exact request | Success | Failure purpose |
 | --- | --- | --- | --- | --- |
-| `POST` | `/passkey/registration/start` | Authenticated request; no required JSON | `200 { options: PublicKeyCredentialCreationOptionsJSON, state: string }` | `401` when no registration user is available |
+| `POST` | `/passkey/registration/start` | Authenticated request; no required JSON | `200 { options: PublicKeyCredentialCreationOptionsJSON, state: string }` | `401` when `registration-user` returns no account |
 | `POST` | `/passkey/registration/verify` | JSON `{ response: RegistrationResponseJSON, state: string }` | `200 { verified: true }` | `400` for invalid, expired, or failed registration |
-| `GET` | `/passkey/authentication/start` | None | `200 { options: PublicKeyCredentialRequestOptionsJSON, state: string }` | `500` for provider state creation failure |
+| `GET` | `/passkey/authentication/start` | None | `200 { options: PublicKeyCredentialRequestOptionsJSON, state: string }` | `500` for storage failure |
 | `POST` | `/passkey/authentication/verify` | JSON `{ response: AuthenticationResponseJSON, state: string }` | `200 TokenResponse` | `401 authentication_failed` for rejected assertions |
 
 Pass the returned `options` to `startRegistration` or `startAuthentication`, then send its `response` with the unchanged `state`. Registration creates a credential but no token pair; authentication verification creates the token pair.
+
+Registration verification must repeat the exact `Authorization` header used at registration start. Aurelian stores challenge state through the configured adapter and consumes each value once.
+
+These are the only four passkey routes. There is no `POST /passkey/authenticate` alias.
 
 ---
 
@@ -393,4 +417,4 @@ type ErrorResponse = {
 }
 ```
 
-Wrong methods return `405 method_not_allowed`, unknown named endpoints return `404 provider_endpoint_not_found`, and unknown paths return `404 route_not_found`. Read [Errors](/errors) for the complete code list.
+Unknown provider keys, paths, and methods return `404 route_not_found` unless a custom router handles them. Read [Errors](/errors) for the complete code list.

@@ -12,6 +12,7 @@ export default defineConfig({
     'providers/oauth': './src/providers/oauth.ts',
     'providers/oidc': './src/providers/oidc.ts',
     'providers/passkey': './src/providers/passkey.ts',
+    'providers/password': './src/providers/password.ts',
     'providers/twitch': './src/providers/twitch.ts',
     profiles: './src/profiles.ts',
     server: './src/server.ts',

@@ -1,4 +1,4 @@
-import type { OAuthProvider } from '../types.js';
+import type { Provider } from '../types.js';
 import { oauth } from './oauth.js';
 
 export type DiscordOptions = {
@@ -8,7 +8,7 @@ export type DiscordOptions = {
   scopes?: string[];
 };
 
-export function discord(options: DiscordOptions): OAuthProvider {
+export function discord(options: DiscordOptions): Provider {
   return oauth({
     authorizationURL: 'https://discord.com/oauth2/authorize',
     clientId: options.clientId,

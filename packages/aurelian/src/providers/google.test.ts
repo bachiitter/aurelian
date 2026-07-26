@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { google } from './google.js';
+import { createProviderTestApp } from './test-utils.js';
 
 const CALLBACK_URL = 'https://auth.example.com/google/callback';
 
@@ -8,24 +9,25 @@ afterEach(() => {
 });
 
 describe('google', () => {
-  it('builds an authorization URL with required and requested scopes', () => {
+  it('builds an authorization URL with required and requested scopes', async () => {
     const provider = google({
       clientId: 'google-client',
       clientSecret: 'google-secret',
       scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
     });
-    const url = provider.authorizationUrl({
-      callbackURL: CALLBACK_URL,
-      request: new Request('https://auth.example.com/google/authorize'),
+    const app = createProviderTestApp(provider, {
+      callback: {
+        callbackURL: CALLBACK_URL,
+        code: 'authorization-code',
+        state: 'upstream-state',
+      },
       scopes: ['email', 'https://www.googleapis.com/auth/drive.file'],
-      state: 'upstream-state',
     });
+    const response = await app.request('/authorize');
+    const result: { url: string } = await response.json();
+    const url = new URL(result.url);
 
     expect(url).toBeInstanceOf(URL);
-
-    if (!(url instanceof URL)) {
-      throw new Error('expected_synchronous_authorization_url');
-    }
 
     expect(url.origin + url.pathname).toBe(
       'https://accounts.google.com/o/oauth2/v2/auth',
@@ -58,13 +60,16 @@ describe('google', () => {
       clientId: 'google-client',
       clientSecret: 'google-secret',
     });
-
-    const identity = await provider.callback({
-      callbackURL: CALLBACK_URL,
-      code: 'authorization-code',
-      request: new Request(`${CALLBACK_URL}?code=authorization-code`),
-      state: 'upstream-state',
+    const app = createProviderTestApp(provider, {
+      callback: {
+        callbackURL: CALLBACK_URL,
+        code: 'authorization-code',
+        state: 'upstream-state',
+      },
     });
+
+    const callbackResponse = await app.request('/callback');
+    const identity = await callbackResponse.json();
 
     expect(identity).toEqual({
       avatarUrl: 'https://example.com/avatar.png',
@@ -102,20 +107,23 @@ describe('google', () => {
       clientId: 'google-client',
       clientSecret: 'google-secret',
     });
-    const callbackInput = {
-      callbackURL: CALLBACK_URL,
-      code: 'authorization-code',
-      request: new Request(`${CALLBACK_URL}?code=authorization-code`),
-      state: 'upstream-state',
-    };
+    const app = createProviderTestApp(provider, {
+      callback: {
+        callbackURL: CALLBACK_URL,
+        code: 'authorization-code',
+        state: 'upstream-state',
+      },
+    });
 
     vi.stubGlobal(
       'fetch',
       vi.fn<typeof fetch>().mockResolvedValue(Response.json({ error: 'invalid_grant' }, { status: 400 })),
     );
-    await expect(provider.callback(callbackInput)).rejects.toThrow(
-      'google_token_exchange_failed',
-    );
+    const tokenFailure = await app.request('/callback');
+
+    await expect(tokenFailure.json()).resolves.toEqual({
+      error: 'google_token_exchange_failed',
+    });
 
     vi.stubGlobal(
       'fetch',
@@ -124,9 +132,11 @@ describe('google', () => {
         .mockResolvedValueOnce(Response.json({ access_token: 'google-access' }))
         .mockResolvedValueOnce(Response.json({ email: 'missing-sub@example.com' })),
     );
-    await expect(provider.callback(callbackInput)).rejects.toThrow(
-      'google_identity_failed',
-    );
+    const identityFailure = await app.request('/callback');
+
+    await expect(identityFailure.json()).resolves.toEqual({
+      error: 'google_identity_failed',
+    });
   });
 
   it('requires client credentials', () => {

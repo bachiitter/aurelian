@@ -1,3 +1,4 @@
+import type { Hono } from 'hono';
 import type { JWK, JWTPayload } from 'jose';
 import type {
   ProfilePayload,
@@ -11,21 +12,7 @@ export type { ProviderIdentity } from './profiles.js';
 
 export type MaybePromise<Value> = Value | Promise<Value>;
 
-export type ProviderEndpoint =
-  | {
-      authenticate: true;
-      method: 'POST';
-    }
-  | {
-      handler(request: Request): MaybePromise<Response>;
-      method: 'GET' | 'POST';
-    };
-
-type ProviderEndpoints = {
-  endpoints?: Record<string, ProviderEndpoint>;
-};
-
-export type OAuthProvider = ProviderEndpoints & {
+export type OAuthFlow = {
   authorizationUrl(input: {
     callbackURL: string;
     request: Request;
@@ -38,17 +25,27 @@ export type OAuthProvider = ProviderEndpoints & {
     request: Request;
     state: string;
   }): MaybePromise<ProviderIdentity>;
-  type: 'oauth';
 };
 
-export type RequestProvider = ProviderEndpoints & {
-  authenticate(input: {
-    request: Request;
-  }): MaybePromise<ProviderIdentity | null>;
-  type: 'request';
+export type ProviderLifecycle = {
+  authenticate(
+    identity: MaybePromise<ProviderIdentity | null>,
+  ): Promise<Response>;
+  authorize(flow: OAuthFlow): Promise<Response>;
+  callback(flow: OAuthFlow): Promise<Response>;
+  providerId: string;
 };
 
-export type Provider = OAuthProvider | RequestProvider;
+export type ProviderEnvironment = {
+  Variables: {
+    aurelian: ProviderLifecycle;
+    requestId: string;
+  };
+};
+
+export type Provider = {
+  router: Hono<ProviderEnvironment>;
+};
 
 export type Session<Profile> = {
   createdAt: number;

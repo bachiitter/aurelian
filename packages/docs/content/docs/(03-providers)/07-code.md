@@ -88,7 +88,7 @@ export const auth = createAuth({
 })
 ```
 
-`identify` and `send` also receive the original `request`. Return a `Response` from `send` to control the delivery endpoint response, or return `void` for an empty `204` response.
+`identify` and `send` also receive the original `request`. Return a `Response` from `send` to control the delivery route response, or return `void` for an empty `204` response.
 
 ---
 
@@ -107,7 +107,7 @@ The `code` map key creates both provider-first paths beneath the issuer. Rename 
 
 ## Request delivery
 
-Post `{ identifier }` to the provider-owned endpoint. Use the same normalized string when you later authenticate.
+Post `{ identifier }` to the provider-owned route. Use the same normalized string when you later authenticate.
 
 ```ts
 const response = await fetch(
@@ -154,7 +154,7 @@ Invalid input, an incorrect value, or a `null` identity returns `401 authenticat
 
 ## Consume one attempt
 
-Storage keys use `aurelian:code:<identifier-hash>`, so the raw identifier is not part of the key. The stored six-digit value is also hashed.
+Storage keys use `aurelian:provider:<provider-key>:code:<identifier-hash>`, so the raw identifier is not part of the key. The stored six-digit value is also hashed.
 
 Authentication consumes that stored hash before comparing the submitted value. One attempt consumes the record, so a wrong attempt invalidates it when storage consumption is atomic.
 

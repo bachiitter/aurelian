@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { memoryStorage } from '../storage/memory.js';
 import { code } from './code.js';
+import { createProviderTestApp } from './test-utils.js';
 
 describe('code', () => {
   it('creates and consumes one-time codes', async () => {
@@ -14,39 +15,36 @@ describe('code', () => {
       },
       storage: memoryStorage(),
     });
+    const app = createProviderTestApp(provider, { providerId: 'code' });
     const identifier = 'user@example.com';
 
-    await provider.endpoints.request.handler(
-      new Request('https://auth.example.com', {
-        body: JSON.stringify({ identifier }),
-        method: 'POST',
-      }),
-    );
+    await app.request('/request', {
+      body: JSON.stringify({ identifier }),
+      method: 'POST',
+    });
     const value = deliveredCodes[0];
 
     if (!value) {
       throw new Error('code_not_delivered');
     }
 
-    const request = new Request('https://auth.example.com', {
+    const authentication = await app.request('/authenticate', {
       body: JSON.stringify({ code: value, identifier }),
       method: 'POST',
     });
 
     expect(value).toMatch(/^\d{6}$/);
-    await expect(provider.authenticate({ request })).resolves.toEqual({
+    await expect(authentication.json()).resolves.toEqual({
       email: identifier,
       emailVerified: true,
       id: identifier,
     });
-    await expect(
-      provider.authenticate({
-        request: new Request('https://auth.example.com', {
-          body: JSON.stringify({ code: value, identifier }),
-          method: 'POST',
-        }),
-      }),
-    ).resolves.toBeNull();
+    const replay = await app.request('/authenticate', {
+      body: JSON.stringify({ code: value, identifier }),
+      method: 'POST',
+    });
+
+    await expect(replay.json()).resolves.toBeNull();
   });
 
   it('consumes the code after an incorrect attempt', async () => {
@@ -60,14 +58,13 @@ describe('code', () => {
       },
       storage: memoryStorage(),
     });
+    const app = createProviderTestApp(provider, { providerId: 'code' });
     const identifier = '+15555550123';
 
-    await provider.endpoints.request.handler(
-      new Request('https://auth.example.com', {
-        body: JSON.stringify({ identifier }),
-        method: 'POST',
-      }),
-    );
+    await app.request('/request', {
+      body: JSON.stringify({ identifier }),
+      method: 'POST',
+    });
     const value = deliveredCodes[0];
 
     if (!value) {
@@ -76,21 +73,16 @@ describe('code', () => {
 
     const incorrectCode = value === '000000' ? '111111' : '000000';
 
-    await expect(
-      provider.authenticate({
-        request: new Request('https://auth.example.com', {
-          body: JSON.stringify({ code: incorrectCode, identifier }),
-          method: 'POST',
-        }),
-      }),
-    ).resolves.toBeNull();
-    await expect(
-      provider.authenticate({
-        request: new Request('https://auth.example.com', {
-          body: JSON.stringify({ code: value, identifier }),
-          method: 'POST',
-        }),
-      }),
-    ).resolves.toBeNull();
+    const incorrect = await app.request('/authenticate', {
+      body: JSON.stringify({ code: incorrectCode, identifier }),
+      method: 'POST',
+    });
+    const retry = await app.request('/authenticate', {
+      body: JSON.stringify({ code: value, identifier }),
+      method: 'POST',
+    });
+
+    await expect(incorrect.json()).resolves.toBeNull();
+    await expect(retry.json()).resolves.toBeNull();
   });
 });

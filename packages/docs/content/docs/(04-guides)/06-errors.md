@@ -30,10 +30,12 @@ A supplied `x-request-id` is preserved when it is at most 128 characters. Otherw
 | --- | --- |
 | `400` | `redirect_uri_invalid`, `state_invalid`, `code_challenge_invalid`, `scope_invalid`, `callback_invalid`, `token_request_invalid`, `authorization_code_invalid`, `code_verifier_required`, `code_verifier_invalid`, `refresh_request_invalid`, `revoke_request_invalid` |
 | `401` | `authentication_failed`, `refresh_token_invalid` |
-| `404` | `provider_not_found`, `route_not_found` |
+| `404` | `route_not_found` |
 | `500` | `internal_server_error` |
 
 Provider exceptions, resolver failures, invalid profile output, storage errors, and signing errors become `internal_server_error` when they pass through `handler`. Direct methods such as `issue` and `refresh` reject instead because they do not use the route wrapper.
+
+Unknown provider keys, paths, and methods fall through to `route_not_found`. Custom provider routers may return their own error responses for routes they handle.
 
 The Google factory throws `google_client_id_required` or `google_client_secret_required` during configuration. Its callback throws `google_token_exchange_failed` or `google_identity_failed`; handler routes report either callback failure as `500 internal_server_error` and pass the original error to `onError`.
 

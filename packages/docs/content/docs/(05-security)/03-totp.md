@@ -1,6 +1,6 @@
 ---
 title: TOTP
-description: Add replay-resistant authenticator codes to request providers
+description: Add replay-resistant authenticator codes to custom routers
 ---
 
 ## Install verification
@@ -43,7 +43,7 @@ Application storage must enforce one active factor per user unless the product i
 Require a recent authenticated session, generate a secret, and store only its encrypted form.
 
 ```ts
-import * as OTPAuth from 'otpauth';
+import * as OTPAuth from 'otpauth'
 import {
   encryptSecret,
   pendingTotpEnrollments,
@@ -81,7 +81,7 @@ The application-owned auth guard returns `{ email: string; id: string }`; `encry
 Verify one code before moving the pending secret to the active record.
 
 ```ts
-import * as OTPAuth from 'otpauth';
+import * as OTPAuth from 'otpauth'
 import {
   activateTotpFactor,
   decryptSecret,
@@ -163,62 +163,67 @@ Import application-owned `verifyUserPassword` and `loginTickets` from the factor
 Consume the ticket, validate a narrow clock window, then update the accepted counter conditionally.
 
 ```ts
-import * as OTPAuth from 'otpauth';
-import type { RequestProvider } from 'aurelian';
+import * as OTPAuth from 'otpauth'
+import { Hono } from 'hono'
+import type { Provider, ProviderEnvironment } from 'aurelian'
 import {
   getTotpFactor,
   loginTickets,
   parseTotpLoginTicket,
   parseTotpRequest,
   storeCounterIfGreater
-} from '~/security/totp.js';
+} from '~/security/totp.js'
 
-export const totpProvider: RequestProvider = {
-  async authenticate({ request }) {
-    const body = await parseTotpRequest(request);
+const router = new Hono<ProviderEnvironment>()
 
-    if (!body) {
-      return null;
-    }
+router.post('/authenticate', async (context) => {
+  const body = await parseTotpRequest(context.req.raw)
 
-    const storedLogin = await loginTickets.consume(body.ticket)
-    const login = storedLogin ? parseTotpLoginTicket(storedLogin) : null
+  if (!body) {
+    return context.var.aurelian.authenticate(null)
+  }
 
-    if (!login) {
-      return null;
-    }
+  const storedLogin = await loginTickets.consume(body.ticket)
+  const login = storedLogin ? parseTotpLoginTicket(storedLogin) : null
 
-    const factor = await getTotpFactor(login.userId);
+  if (!login) {
+    return context.var.aurelian.authenticate(null)
+  }
 
-    if (!factor) {
-      return null;
-    }
+  const factor = await getTotpFactor(login.userId)
 
-    const timestamp = Date.now();
-    const totp = new OTPAuth.TOTP({
-      algorithm: 'SHA1',
-      digits: 6,
-      period: 30,
-      secret: factor.decryptedSecret
-    });
-    const delta = totp.validate({
-      timestamp,
-      token: body.code,
-      window: 1
-    });
+  if (!factor) {
+    return context.var.aurelian.authenticate(null)
+  }
 
-    if (delta === null) {
-      return null;
-    }
+  const timestamp = Date.now()
+  const totp = new OTPAuth.TOTP({
+    algorithm: 'SHA1',
+    digits: 6,
+    period: 30,
+    secret: factor.decryptedSecret
+  })
+  const delta = totp.validate({
+    timestamp,
+    token: body.code,
+    window: 1
+  })
 
-    const counter = Math.floor(timestamp / 1000 / 30) + delta;
-    const isFresh = await storeCounterIfGreater(factor.id, counter);
+  if (delta === null) {
+    return context.var.aurelian.authenticate(null)
+  }
 
-    return isFresh ? { id: login.userId } : null;
-  },
-  type: 'request'
-};
+  const counter = Math.floor(timestamp / 1000 / 30) + delta
+  const isFresh = await storeCounterIfGreater(factor.id, counter)
+  const identity = isFresh ? { id: login.userId } : null
+
+  return context.var.aurelian.authenticate(identity)
+})
+
+export const totpProvider: Provider = { router }
 ```
+
+Install `hono` directly for this custom router. Its explicit relative route becomes `/totp/authenticate`, and `context.var.aurelian.authenticate` keeps profile resolution and token issuance in Aurelian.
 
 `parseTotpRequest` returns `{ code: string; ticket: string } | null`, `getTotpFactor` returns `TotpFactor | null`, and `storeCounterIfGreater` performs one conditional database update. A window of `1` tolerates modest clock drift while the counter check prevents reusing an accepted step.
 

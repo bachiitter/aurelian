@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { oauth } from './oauth.js';
+import { createProviderTestApp } from './test-utils.js';
 
 describe('oauth', () => {
   it('exchanges a code and delegates identity loading', async () => {
@@ -27,18 +28,20 @@ describe('oauth', () => {
       scopes: ['profile'],
       tokenURL: 'https://provider.example.com/token',
     });
-    const authorization = await provider.authorizationUrl({
-      callbackURL: 'https://auth.example.com/example/callback',
-      request: new Request('https://auth.example.com'),
+    const app = createProviderTestApp(provider, {
+      callback: {
+        callbackURL: 'https://auth.example.com/example/callback',
+        code: 'code_123',
+        state: 'state_123',
+      },
       scopes: ['email'],
-      state: 'state_123',
     });
-    const identity = await provider.callback({
-      callbackURL: 'https://auth.example.com/example/callback',
-      code: 'code_123',
-      request: new Request('https://auth.example.com'),
-      state: 'state_123',
-    });
+    const authorizationResponse = await app.request('/authorize');
+    const authorizationResult: { url: string } =
+      await authorizationResponse.json();
+    const authorization = new URL(authorizationResult.url);
+    const callbackResponse = await app.request('/callback');
+    const identity = await callbackResponse.json();
 
     expect(authorization.searchParams.get('scope')).toBe('profile email');
     expect(authorization.searchParams.get('state')).toBe('state_123');

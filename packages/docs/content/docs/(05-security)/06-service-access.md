@@ -25,31 +25,39 @@ Import `defineProfiles` from `aurelian` and `z` from `zod`. The service ID becom
 
 ## Verify credentials
 
-Use a request provider for application-managed service credentials.
+Use a custom provider router for application-managed service credentials. Install `hono` directly before defining it.
 
 ```ts
-import type { RequestProvider } from 'aurelian';
-import { verifyServiceCredential } from '~/services/credentials.js';
+import { Hono } from 'hono'
+import type { Provider, ProviderEnvironment } from 'aurelian'
+import { verifyServiceCredential } from '~/services/credentials.js'
 
-export const serviceProvider: RequestProvider = {
-  async authenticate({ request }) {
-    const authorization = request.headers.get('authorization');
+const router = new Hono<ProviderEnvironment>()
 
-    if (!authorization?.startsWith('Basic ')) {
-      return null;
-    }
+router.post('/authenticate', async (context) => {
+  const request = context.req.raw
+  const authorization = request.headers.get('authorization')
 
-    const service = await verifyServiceCredential(authorization.slice(6));
+  if (!authorization?.startsWith('Basic ')) {
+    return context.var.aurelian.authenticate(null)
+  }
 
-    if (!service) {
-      return null;
-    }
+  const service = await verifyServiceCredential(authorization.slice(6))
 
-    return { id: service.id, name: service.name };
-  },
-  type: 'request'
-};
+  if (!service) {
+    return context.var.aurelian.authenticate(null)
+  }
+
+  return context.var.aurelian.authenticate({
+    id: service.id,
+    name: service.name
+  })
+})
+
+export const serviceProvider: Provider = { router }
 ```
+
+The explicit relative route becomes `/service/authenticate` when registered as `providers.service`. Calling `context.var.aurelian.authenticate` keeps profile resolution and token issuance centralized.
 
 The application-owned verifier accepts the encoded credential string and returns `{ id: string; name: string } | null`. Decode strictly, compare a slow credential hash in constant time, rate-limit failures, and never log the header.
 

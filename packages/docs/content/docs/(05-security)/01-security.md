@@ -19,9 +19,9 @@ Do not confuse the client return URI with the upstream provider callback. Regist
 
 ## Consume once
 
-`StorageAdapter.consume` must return and delete a value atomically. This operation protects OAuth state, authorization codes, refresh tokens, and one-time proofs from concurrent replay.
+`StorageAdapter.consume` must return and delete a value atomically. This operation protects OAuth state, authorization codes, refresh tokens, one-time proofs, password flow state, and passkey challenges from concurrent replay.
 
-Consumption happens before later checks or external calls. One submitted six-digit value consumes its record even when it is wrong, just as a bad verifier burns its authorization code and a rejected refresh burns its refresh token.
+Consumption happens before later checks or external calls. One submitted six-digit value consumes its record even when it is wrong, just as a failed passkey ceremony, bad verifier, or rejected refresh burns its state.
 
 Use [Custom storage](/custom-storage) to implement and test this contract. Choose strongly consistent transactional storage, such as a Cloudflare Durable Object or transactional database.
 
@@ -49,9 +49,21 @@ Bind step-up, linking, TOTP, and passkey ceremonies to short-lived opaque transa
 
 Store the last accepted TOTP counter and update it only when the next counter is greater. Hash recovery codes, consume them once, and replace the full set after recovery.
 
-Require discoverable credentials and user verification for passkey registration, then bind registration state to the authenticated session. Keep authentication state usable before login while still expiring and consuming it once.
+Require discoverable credentials and user verification for passkey registration. Aurelian binds registration state to the exact `Authorization` header from its start request, so send the same value during verification.
+
+Keep authentication state usable before login while still expiring and consuming it once.
 
 Validate the expected challenge, origin, RP ID, and user verification. Store credential IDs uniquely, update non-zero counters with a conditional write, and recognize that always-zero authenticators cannot offer counter-based clone detection.
+
+---
+
+## Harden account secrets
+
+Normalize identifiers before lookup and enforce password policy during registration and reset, not during sign-in. Persist only hashes supplied by the provider, and use a unique transaction when creating an account or changing its hash.
+
+Rate-limit authentication, code delivery, code verification, and reset completion by network and account signals. Keep reset responses uniform for known and unknown identifiers, and avoid timing differences when suppressing delivery.
+
+The built-in provider uses salted PBKDF2-SHA-256 by default and lets applications supply another hasher. Review [Password](/password) for work-factor tuning, route behavior, and one-attempt state consumption.
 
 ---
 

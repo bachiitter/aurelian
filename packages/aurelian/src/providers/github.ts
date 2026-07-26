@@ -1,4 +1,4 @@
-import type { OAuthProvider } from '../types.js';
+import type { Provider } from '../types.js';
 import { oauth } from './oauth.js';
 
 const API_URL = 'https://api.github.com';
@@ -10,7 +10,7 @@ export type GitHubOptions = {
   scopes?: string[];
 };
 
-export function github(options: GitHubOptions): OAuthProvider {
+export function github(options: GitHubOptions): Provider {
   return oauth({
     authorizationURL: 'https://github.com/login/oauth/authorize',
     clientId: options.clientId,

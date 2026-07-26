@@ -64,21 +64,24 @@ async function createStepUpTicket(accessToken: string): Promise<{
 
 ## Verify another factor
 
-Consume the ticket and verify the factor for its bound user. This example uses an application-owned TOTP verifier with signature `(userId: string, code: string) => Promise<boolean>`.
+Consume the ticket and verify the factor for its bound user. Install `hono` directly before defining this custom router.
+
+This example uses an application-owned TOTP verifier with signature `(userId: string, code: string) => Promise<boolean>`.
 
 ```ts
-import type { RequestProvider } from 'aurelian';
+import { Hono } from 'hono'
+import type { Provider, ProviderEnvironment } from 'aurelian'
 import {
   parseStepUpTicket,
   stepUpTickets,
   verifyTotp
-} from '~/security/step-up.js';
+} from '~/security/step-up.js'
 
 async function readStepUpBody(request: Request): Promise<{
-  code: string;
-  ticket: string;
+  code: string
+  ticket: string
 } | null> {
-  const value: unknown = await request.json().catch(() => null);
+  const value: unknown = await request.json().catch(() => null)
 
   if (
     typeof value !== 'object' ||
@@ -88,32 +91,35 @@ async function readStepUpBody(request: Request): Promise<{
     !('ticket' in value) ||
     typeof value.ticket !== 'string'
   ) {
-    return null;
+    return null
   }
 
-  return { code: value.code, ticket: value.ticket };
+  return { code: value.code, ticket: value.ticket }
 }
 
-export const stepUpProvider: RequestProvider = {
-  async authenticate({ request }) {
-    const body = await readStepUpBody(request);
+const router = new Hono<ProviderEnvironment>()
 
-    if (!body) {
-      return null;
-    }
+router.post('/authenticate', async (context) => {
+  const body = await readStepUpBody(context.req.raw)
 
-    const storedStepUp = await stepUpTickets.consume(body.ticket)
-    const stepUp = storedStepUp ? parseStepUpTicket(storedStepUp) : null
+  if (!body) {
+    return context.var.aurelian.authenticate(null)
+  }
 
-    if (!stepUp || !(await verifyTotp(stepUp.userId, body.code))) {
-      return null;
-    }
+  const storedStepUp = await stepUpTickets.consume(body.ticket)
+  const stepUp = storedStepUp ? parseStepUpTicket(storedStepUp) : null
 
-    return { id: stepUp.userId };
-  },
-  type: 'request'
-};
+  if (!stepUp || !(await verifyTotp(stepUp.userId, body.code))) {
+    return context.var.aurelian.authenticate(null)
+  }
+
+  return context.var.aurelian.authenticate({ id: stepUp.userId })
+})
+
+export const stepUpProvider: Provider = { router }
 ```
+
+The explicit route becomes `/step-up/authenticate` under the matching provider map key. `context.var.aurelian.authenticate` resolves the identity and issues the elevated token pair.
 
 The ticket is consumed even when the factor is wrong. Rate-limit ticket creation and factor attempts by account and network source.
 

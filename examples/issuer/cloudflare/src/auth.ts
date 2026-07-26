@@ -4,7 +4,6 @@ import { code } from 'aurelian/providers/code';
 import { credentials } from 'aurelian/providers/credentials';
 import { google } from 'aurelian/providers/google';
 import { passkey } from 'aurelian/providers/passkey';
-import type { PasskeyState } from 'aurelian/providers/passkey';
 import { z } from 'zod';
 import { durableObjectStorage } from './storage.js';
 import type { Env } from './types.js';
@@ -17,11 +16,6 @@ const profiles = defineProfiles({
     id: z.string().min(1),
   }),
 });
-
-type StoredPasskeyState = {
-  authorization: string | null;
-  value: PasskeyState;
-};
 
 export function createExampleAuth(env: Env): Auth<ProfilePayload<typeof profiles>> {
   const appURL = new URL(env.APP_ORIGIN);
@@ -72,58 +66,53 @@ export function createExampleAuth(env: Env): Auth<ProfilePayload<typeof profiles
         storage,
       }),
       passkey: passkey({
-        async consumeState({ request, state }) {
-          const serialized = await records.consume(
-            `application:passkey-state:${state}`,
-          );
-          const stored: StoredPasskeyState | null = serialized
-            ? JSON.parse(serialized)
-            : null;
+        async handle(event) {
+          if (event.type === 'credential') {
+            const credential = await records.getCredential(
+              `application:passkey:${event.id}`,
+            );
 
-          if (
-            stored?.value.type === 'registration' &&
-            stored.authorization !== request.headers.get('authorization')
-          ) {
-            return null;
+            return credential
+              ? {
+                  ...credential,
+                  identity: {
+                    email: credential.email,
+                    emailVerified: true,
+                    id: credential.userId,
+                  },
+                  publicKey: new Uint8Array(credential.publicKey),
+                }
+              : null;
           }
 
-          return stored?.value ?? null;
-        },
-        async createState({ request, value }) {
-          const state = crypto.randomUUID();
+          if (event.type === 'credential-created') {
+            if (!event.identity.email) {
+              throw new Error('email_required');
+            }
 
-          await records.set(
-            `application:passkey-state:${state}`,
-            JSON.stringify({
-              authorization:
-                value.type === 'registration'
-                  ? request.headers.get('authorization')
-                  : null,
-              value,
-            } satisfies StoredPasskeyState),
-            5 * 60,
-          );
-          return state;
-        },
-        async getCredential(id) {
-          const credential = await records.getCredential(
-            `application:passkey:${id}`,
-          );
+            await records.set(
+              `application:passkey:${event.credential.id}`,
+              {
+                ...event.credential,
+                email: event.identity.email,
+                publicKey: [...event.credential.publicKey],
+                userId: event.identity.id,
+              },
+              365 * 24 * 60 * 60,
+            );
+            return;
+          }
 
-          return credential
-            ? {
-                ...credential,
-                identity: {
-                  email: credential.email,
-                  emailVerified: true,
-                  id: credential.userId,
-                },
-                publicKey: new Uint8Array(credential.publicKey),
-              }
-            : null;
-        },
-        async getRegistrationUser(request) {
-          const authorization = request.headers.get('authorization');
+          if (event.type === 'counter-update') {
+            return records.updateCounter(
+              `application:passkey:${event.credentialId}`,
+              event.credentialId,
+              event.currentCounter,
+              event.newCounter,
+            );
+          }
+
+          const authorization = event.request.headers.get('authorization');
           const session = authorization?.startsWith('Bearer ')
             ? await auth.verify(authorization.slice(7))
             : null;
@@ -142,30 +131,7 @@ export function createExampleAuth(env: Env): Auth<ProfilePayload<typeof profiles
         origin: appURL.origin,
         rpID: appURL.hostname,
         rpName: 'Aurelian Example',
-        async saveCredential({ credential, identity }) {
-          if (!identity.email) {
-            throw new Error('email_required');
-          }
-
-          await records.set(
-            `application:passkey:${credential.id}`,
-            {
-              ...credential,
-              email: identity.email,
-              publicKey: [...credential.publicKey],
-              userId: identity.id,
-            },
-            365 * 24 * 60 * 60,
-          );
-        },
-        updateCounter({ credentialId, currentCounter, newCounter }) {
-          return records.updateCounter(
-            `application:passkey:${credentialId}`,
-            credentialId,
-            currentCounter,
-            newCounter,
-          );
-        },
+        storage,
       }),
       credentials: credentials({
         schema: z.object({
