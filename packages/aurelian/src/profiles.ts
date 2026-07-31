@@ -1,4 +1,4 @@
-import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 export type ProviderIdentity = {
   avatarUrl?: string;
@@ -22,9 +22,7 @@ export type ProfilePayload<Schema extends ProfileSchema> = {
   };
 }[keyof Schema & string];
 
-export type ProfileFactory<Schema extends ProfileSchema> = <
-  Type extends keyof Schema & string,
->(
+export type ProfileFactory<Schema extends ProfileSchema> = <Type extends keyof Schema & string>(
   type: Type,
   properties: ProfileProperties<Schema[Type]>,
 ) => {
@@ -44,9 +42,7 @@ export type ProfileResolver<
   };
 }) => ProfilePayload<Profiles> | Promise<ProfilePayload<Profiles>>;
 
-export function defineProfiles<Schema extends ProfileSchema>(
-  profiles: Schema,
-): Schema {
+export function defineProfiles<Schema extends ProfileSchema>(profiles: Schema): Schema {
   return profiles;
 }
 
@@ -69,24 +65,24 @@ export async function validateProfile<
   const schema = profiles[profile.type];
 
   if (!schema) {
-    throw new Error('profile_type_invalid');
+    throw new Error("profile_type_invalid");
   }
 
-  const result = await schema['~standard'].validate(profile.properties);
+  const result = await schema["~standard"].validate(profile.properties);
 
   if (result.issues) {
-    throw new Error('profile_invalid');
+    throw new Error("profile_invalid");
   }
 
   if (
-    typeof result.value !== 'object' ||
+    typeof result.value !== "object" ||
     result.value === null ||
-    !('id' in result.value) ||
-    typeof result.value.id !== 'string' ||
+    !("id" in result.value) ||
+    typeof result.value.id !== "string" ||
     result.value.id.length === 0 ||
     result.value.id.length > 512
   ) {
-    throw new Error('profile_id_invalid');
+    throw new Error("profile_id_invalid");
   }
 
   return {

@@ -1,6 +1,6 @@
-import { createRemoteJWKSet, customFetch, jwtVerify } from 'jose';
-import { createHash, createRandomString } from './crypto.js';
-import type { AccessTokenClaims, TokenResponse, VerifyResult } from './types.js';
+import { createRemoteJWKSet, customFetch, jwtVerify } from "jose";
+import { sha, createRandomString } from "./crypto.js";
+import type { AccessTokenClaims, TokenResponse, VerifyResult } from "./types.js";
 
 export type CreateClientOptions = {
   audience?: string | string[];
@@ -31,7 +31,7 @@ export type AuthorizeResult = {
 export type { TokenResponse, VerifyResult };
 
 export function createClient<Profile = unknown>(options: CreateClientOptions) {
-  const issuer = options.issuer.replace(/\/$/, '');
+  const issuer = options.issuer.replace(/\/$/, "");
   const request = options.fetch ?? globalThis.fetch;
   const transactionPrefix = `aurelian:${issuer}:oauth`;
   const jwks = createRemoteJWKSet(
@@ -40,10 +40,7 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
   );
 
   return {
-    async authenticate<Body>(
-      provider: string,
-      body: Body,
-    ): Promise<TokenResponse> {
+    async authenticate<Body>(provider: string, body: Body): Promise<TokenResponse> {
       return postToken(request, `${issuer}/${provider}/authenticate`, body);
     },
     async authorize(input: AuthorizeOptions): Promise<AuthorizeResult> {
@@ -54,17 +51,17 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
       const storage = options.storage ?? globalThis.sessionStorage;
 
       if (!redirectURI) {
-        throw new Error('oauth_redirect_uri_required');
+        throw new Error("oauth_redirect_uri_required");
       }
 
       if (!storage) {
-        throw new Error('oauth_storage_required');
+        throw new Error("oauth_storage_required");
       }
 
       const transactionKey = `${transactionPrefix}:${state}`;
 
       if (storage.getItem(transactionKey) !== null) {
-        throw new Error('oauth_state_in_use');
+        throw new Error("oauth_state_in_use");
       }
 
       storage.setItem(
@@ -72,15 +69,15 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
         JSON.stringify({ codeVerifier: challenge.verifier, redirectURI }),
       );
 
-      url.searchParams.set('redirect_uri', redirectURI);
-      url.searchParams.set('state', state);
+      url.searchParams.set("redirect_uri", redirectURI);
+      url.searchParams.set("state", state);
 
       if (input.scopes?.length) {
-        url.searchParams.set('scope', input.scopes.join(' '));
+        url.searchParams.set("scope", input.scopes.join(" "));
       }
 
-      url.searchParams.set('code_challenge', challenge.challenge);
-      url.searchParams.set('code_challenge_method', challenge.method);
+      url.searchParams.set("code_challenge", challenge.challenge);
+      url.searchParams.set("code_challenge_method", challenge.method);
 
       return { state, url };
     },
@@ -91,32 +88,30 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
     }): Promise<TokenResponse> {
       return postToken(request, `${issuer}/token`, input);
     },
-    async handleCallback(input?: {
-      url?: string | URL;
-    }): Promise<TokenResponse> {
+    async handleCallback(input?: { url?: string | URL }): Promise<TokenResponse> {
       const callbackURL = input?.url
         ? new URL(input.url)
-        : typeof globalThis.location === 'undefined'
+        : typeof globalThis.location === "undefined"
           ? null
           : new URL(globalThis.location.href);
       const storage = options.storage ?? globalThis.sessionStorage;
-      const code = callbackURL?.searchParams.get('code');
-      const state = callbackURL?.searchParams.get('state');
-      const providerError = callbackURL?.searchParams.get('error');
+      const code = callbackURL?.searchParams.get("code");
+      const state = callbackURL?.searchParams.get("state");
+      const providerError = callbackURL?.searchParams.get("error");
 
       if (!storage) {
-        throw new Error('oauth_storage_required');
+        throw new Error("oauth_storage_required");
       }
 
       if (!state) {
-        throw new Error('oauth_callback_invalid');
+        throw new Error("oauth_callback_invalid");
       }
 
       const transactionKey = `${transactionPrefix}:${state}`;
       const storedTransaction = storage.getItem(transactionKey);
 
       if (!storedTransaction) {
-        throw new Error('oauth_state_invalid');
+        throw new Error("oauth_state_invalid");
       }
 
       storage.removeItem(transactionKey);
@@ -126,26 +121,26 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
       try {
         transaction = JSON.parse(storedTransaction);
       } catch {
-        throw new Error('oauth_state_invalid');
+        throw new Error("oauth_state_invalid");
       }
 
       if (
-        typeof transaction !== 'object' ||
+        typeof transaction !== "object" ||
         transaction === null ||
-        !('codeVerifier' in transaction) ||
-        typeof transaction.codeVerifier !== 'string' ||
-        !('redirectURI' in transaction) ||
-        typeof transaction.redirectURI !== 'string'
+        !("codeVerifier" in transaction) ||
+        typeof transaction.codeVerifier !== "string" ||
+        !("redirectURI" in transaction) ||
+        typeof transaction.redirectURI !== "string"
       ) {
-        throw new Error('oauth_state_invalid');
+        throw new Error("oauth_state_invalid");
       }
 
       if (providerError) {
-        throw new Error('oauth_provider_error');
+        throw new Error("oauth_provider_error");
       }
 
       if (!code) {
-        throw new Error('oauth_callback_invalid');
+        throw new Error("oauth_callback_invalid");
       }
 
       return postToken(request, `${issuer}/token`, {
@@ -160,12 +155,12 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
     async revoke(input: { refreshToken: string }): Promise<void> {
       const response = await request(`${issuer}/token/revoke`, {
         body: JSON.stringify(input),
-        headers: { 'content-type': 'application/json' },
-        method: 'POST',
+        headers: { "content-type": "application/json" },
+        method: "POST",
       });
 
       if (!response.ok) {
-        throw new Error('token_revoke_failed');
+        throw new Error("token_revoke_failed");
       }
     },
     async verify(accessToken: string): Promise<VerifyResult<Profile>> {
@@ -173,24 +168,15 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
         const result = await jwtVerify(accessToken, jwks, {
           audience: options.audience,
           issuer,
-          requiredClaims: [
-            'exp',
-            'iat',
-            'jti',
-            'nbf',
-            'profile',
-            'sid',
-            'sub',
-            'typ',
-          ],
-          typ: 'JWT',
+          requiredClaims: ["exp", "iat", "jti", "nbf", "profile", "sid", "sub", "typ"],
+          typ: "JWT",
         });
         if (
-          result.payload.typ !== 'access' ||
-          typeof result.payload.sid !== 'string' ||
+          result.payload.typ !== "access" ||
+          typeof result.payload.sid !== "string" ||
           result.payload.profile === undefined
         ) {
-          return { reason: 'token_invalid', valid: false };
+          return { reason: "token_invalid", valid: false };
         }
 
         const profile = result.payload.profile as Profile;
@@ -207,7 +193,7 @@ export function createClient<Profile = unknown>(options: CreateClientOptions) {
           valid: true,
         };
       } catch {
-        return { reason: 'token_invalid', valid: false };
+        return { reason: "token_invalid", valid: false };
       }
     },
   };
@@ -217,8 +203,8 @@ async function createPKCEChallenge() {
   const verifier = createRandomString(64);
 
   return {
-    challenge: await createHash(verifier),
-    method: 'S256',
+    challenge: await sha("SHA-256", verifier),
+    method: "S256",
     verifier,
   };
 }
@@ -230,29 +216,29 @@ async function postToken(
 ): Promise<TokenResponse> {
   const response = await request(url, {
     body: JSON.stringify(body),
-    headers: { 'content-type': 'application/json' },
-    method: 'POST',
+    headers: { "content-type": "application/json" },
+    method: "POST",
   });
 
   if (!response.ok) {
-    throw new Error('token_request_failed');
+    throw new Error("token_request_failed");
   }
 
   const value: unknown = await response.json();
 
   if (
-    typeof value !== 'object' ||
+    typeof value !== "object" ||
     value === null ||
-    !('accessToken' in value) ||
-    typeof value.accessToken !== 'string' ||
-    !('expiresIn' in value) ||
-    typeof value.expiresIn !== 'number' ||
-    !('refreshToken' in value) ||
-    typeof value.refreshToken !== 'string' ||
-    !('tokenType' in value) ||
-    value.tokenType !== 'Bearer'
+    !("accessToken" in value) ||
+    typeof value.accessToken !== "string" ||
+    !("expiresIn" in value) ||
+    typeof value.expiresIn !== "number" ||
+    !("refreshToken" in value) ||
+    typeof value.refreshToken !== "string" ||
+    !("tokenType" in value) ||
+    value.tokenType !== "Bearer"
   ) {
-    throw new Error('token_response_invalid');
+    throw new Error("token_response_invalid");
   }
 
   return {

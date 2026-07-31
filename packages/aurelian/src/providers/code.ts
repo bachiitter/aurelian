@@ -1,20 +1,13 @@
-import { Hono } from 'hono';
-import { createHash } from '../crypto.js';
-import type { ProviderIdentity } from '../profiles.js';
-import type { StorageAdapter } from '../storage/types.js';
-import type {
-  MaybePromise,
-  Provider,
-  ProviderEnvironment,
-} from '../types.js';
+import { Hono } from "hono";
+import { sha } from "../crypto.js";
+import type { ProviderIdentity } from "../profiles.js";
+import type { StorageAdapter } from "../storage/types.js";
+import type { MaybePromise, Provider, ProviderEnvironment } from "../types.js";
 
 const DEFAULT_TTL = 5 * 60;
 
 export type CodeOptions = {
-  identify(input: {
-    identifier: string;
-    request: Request;
-  }): MaybePromise<ProviderIdentity | null>;
+  identify(input: { identifier: string; request: Request }): MaybePromise<ProviderIdentity | null>;
   send(input: {
     code: string;
     identifier: string;
@@ -30,35 +23,35 @@ export function code(options: CodeOptions): CodeProvider {
   const ttl = options.ttl ?? DEFAULT_TTL;
 
   if (!Number.isSafeInteger(ttl) || ttl <= 0) {
-    throw new RangeError('code.ttl must be a positive integer.');
+    throw new RangeError("code.ttl must be a positive integer.");
   }
 
   const router = new Hono<ProviderEnvironment>();
 
-  router.post('/authenticate', async (context) => {
+  router.post("/authenticate", async (context) => {
     const request = context.req.raw;
     const body: unknown = await request.json().catch(() => null);
 
     if (
-      typeof body !== 'object' ||
+      typeof body !== "object" ||
       body === null ||
-      !('code' in body) ||
-      typeof body.code !== 'string' ||
+      !("code" in body) ||
+      typeof body.code !== "string" ||
       !/^\d{6}$/.test(body.code) ||
-      !('identifier' in body) ||
-      typeof body.identifier !== 'string' ||
+      !("identifier" in body) ||
+      typeof body.identifier !== "string" ||
       body.identifier.length === 0 ||
       body.identifier.length > 512
     ) {
       return context.var.aurelian.authenticate(null);
     }
 
-    const identifierHash = await createHash(body.identifier);
+    const identifierHash = await sha("SHA-256", body.identifier);
     const codeHash = await options.storage.consume(
       getCodeKey(context.var.aurelian.providerId, identifierHash),
     );
 
-    if (!codeHash || codeHash !== (await createHash(body.code))) {
+    if (!codeHash || codeHash !== (await sha("SHA-256", body.code))) {
       return context.var.aurelian.authenticate(null);
     }
 
@@ -67,28 +60,28 @@ export function code(options: CodeOptions): CodeProvider {
     );
   });
 
-  router.post('/request', async (context) => {
+  router.post("/request", async (context) => {
     const request = context.req.raw;
     const body: unknown = await request.json().catch(() => null);
 
     if (
-      typeof body !== 'object' ||
+      typeof body !== "object" ||
       body === null ||
-      !('identifier' in body) ||
-      typeof body.identifier !== 'string' ||
+      !("identifier" in body) ||
+      typeof body.identifier !== "string" ||
       body.identifier.length === 0 ||
       body.identifier.length > 512
     ) {
-      return new Response('Identifier is required.', { status: 400 });
+      return new Response("Identifier is required.", { status: 400 });
     }
 
     const values = crypto.getRandomValues(new Uint32Array(1));
-    const value = String((values[0] ?? 0) % 1_000_000).padStart(6, '0');
-    const identifierHash = await createHash(body.identifier);
+    const value = String((values[0] ?? 0) % 1_000_000).padStart(6, "0");
+    const identifierHash = await sha("SHA-256", body.identifier);
 
     await options.storage.set(
       getCodeKey(context.var.aurelian.providerId, identifierHash),
-      await createHash(value),
+      await sha("SHA-256", value),
       { ttl },
     );
 

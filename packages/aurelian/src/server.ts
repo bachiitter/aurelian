@@ -1,16 +1,12 @@
-import { Hono } from 'hono';
-import {
-  createHash,
-  createRandomString,
-  createTokenService,
-} from './crypto.js';
-import { validateProfile } from './profiles.js';
+import { Hono } from "hono";
+import { sha, createRandomString, createTokenService } from "./crypto.js";
+import { validateProfile } from "./profiles.js";
 import type {
   ProfilePayload,
   ProfileProperties,
   ProfileSchema,
   ProviderIdentity,
-} from './profiles.js';
+} from "./profiles.js";
 import type {
   Auth,
   CreateAuthOptions,
@@ -21,7 +17,7 @@ import type {
   Session,
   TokenResponse,
   VerifyResult,
-} from './types.js';
+} from "./types.js";
 
 const ACCESS_TTL_SECONDS = 10 * 60;
 const AUTHORIZATION_CODE_TTL_SECONDS = 5 * 60;
@@ -56,41 +52,36 @@ type RefreshTokenRecord<Profile> = {
 export function createAuth<
   const Providers extends Record<string, Provider>,
   const Profiles extends ProfileSchema,
->(
-  options: CreateAuthOptions<Providers, Profiles>,
-): Auth<ProfilePayload<Profiles>> {
+>(options: CreateAuthOptions<Providers, Profiles>): Auth<ProfilePayload<Profiles>> {
   type Profile = ProfilePayload<Profiles>;
 
   const accessTtl = options.access?.ttl ?? ACCESS_TTL_SECONDS;
   const refreshTtl = options.refresh?.ttl ?? REFRESH_TTL_SECONDS;
-  const signingAlgorithm = options.signing.algorithm ?? 'RS256';
+  const signingAlgorithm = options.signing.algorithm ?? "RS256";
 
   if (!Number.isSafeInteger(accessTtl) || accessTtl <= 0) {
-    throw new RangeError('access.ttl must be a positive integer.');
+    throw new RangeError("access.ttl must be a positive integer.");
   }
 
   if (!Number.isSafeInteger(refreshTtl) || refreshTtl <= 0) {
-    throw new RangeError('refresh.ttl must be a positive integer.');
+    throw new RangeError("refresh.ttl must be a positive integer.");
   }
 
   const issuerURL = new URL(options.issuer);
   const isLoopback =
-    issuerURL.hostname === 'localhost' ||
-    issuerURL.hostname === '127.0.0.1' ||
-    issuerURL.hostname === '[::1]';
+    issuerURL.hostname === "localhost" ||
+    issuerURL.hostname === "127.0.0.1" ||
+    issuerURL.hostname === "[::1]";
 
-  if (
-    issuerURL.protocol !== 'https:' &&
-    !(issuerURL.protocol === 'http:' && isLoopback)
-  ) {
-    throw new Error('issuer_invalid');
+  if (issuerURL.protocol !== "https:" && !(issuerURL.protocol === "http:" && isLoopback)) {
+    throw new Error("issuer_invalid");
   }
 
-  issuerURL.hash = '';
-  issuerURL.search = '';
+  issuerURL.hash = "";
+  issuerURL.search = "";
 
-  const issuer = issuerURL.toString().replace(/\/$/, '');
-  const issuerPath = issuerURL.pathname.replace(/\/$/, '');
+  const issuer = issuerURL.toString().replace(/\/$/, "");
+  const issuerPath = issuerURL.pathname.replace(/\/$/, "");
   const tokenService = createTokenService<Profile>({
     ...options.signing,
     algorithm: signingAlgorithm,
@@ -117,21 +108,19 @@ export function createAuth<
     });
   }
 
-  async function createTokenPair(
-    input: {
-      createdAt?: number;
-      expiresAt?: number;
-      profile: Profile;
-      provider: string;
-      sessionId?: string;
-    },
-  ): Promise<TokenResponse> {
+  async function createTokenPair(input: {
+    createdAt?: number;
+    expiresAt?: number;
+    profile: Profile;
+    provider: string;
+    sessionId?: string;
+  }): Promise<TokenResponse> {
     const now = Math.floor(Date.now() / 1000);
     const expiresAt = input.expiresAt ?? now + refreshTtl;
     const sessionTtl = expiresAt - now;
 
     if (sessionTtl <= 0) {
-      throw new Error('session_expired');
+      throw new Error("session_expired");
     }
 
     const validated = await validateProfile(input.profile, options.profiles);
@@ -142,7 +131,6 @@ export function createAuth<
       expiresAt,
       id: input.sessionId ?? `sess_${createRandomString(32)}`,
       profile,
-      provider: input.provider,
     };
     const accessToken = await tokenService.issue({
       issuer,
@@ -152,10 +140,10 @@ export function createAuth<
       ttl: accessTokenTtl,
     });
     const refreshToken = `rt_${createRandomString(64)}`;
-    const refreshTokenHash = await createHash(refreshToken);
+    const refreshTokenHash = await sha("SHA-256", refreshToken);
 
     await options.storage.set(
-      getStorageKey('refresh', refreshTokenHash),
+      getStorageKey("refresh", refreshTokenHash),
       JSON.stringify({
         createdAt: session.createdAt,
         expiresAt: session.expiresAt,
@@ -171,7 +159,7 @@ export function createAuth<
       accessToken,
       expiresIn: accessTokenTtl,
       refreshToken,
-      tokenType: 'Bearer',
+      tokenType: "Bearer",
     };
   }
 
@@ -191,13 +179,9 @@ export function createAuth<
       return null;
     }
 
-    const refreshTokenHash = await createHash(input.refreshToken);
-    const storedValue = await options.storage.consume(
-      getStorageKey('refresh', refreshTokenHash),
-    );
-    const value: RefreshTokenRecord<Profile> | null = storedValue
-      ? JSON.parse(storedValue)
-      : null;
+    const refreshTokenHash = await sha("SHA-256", input.refreshToken);
+    const storedValue = await options.storage.consume(getStorageKey("refresh", refreshTokenHash));
+    const value: RefreshTokenRecord<Profile> | null = storedValue ? JSON.parse(storedValue) : null;
 
     const now = Math.floor(Date.now() / 1000);
 
@@ -217,15 +201,13 @@ export function createAuth<
       return null;
     }
 
-    return createTokenPair(
-      {
-        createdAt: value.createdAt,
-        expiresAt: value.expiresAt,
-        profile,
-        provider: value.provider,
-        sessionId: value.sessionId,
-      },
-    );
+    return createTokenPair({
+      createdAt: value.createdAt,
+      expiresAt: value.expiresAt,
+      profile,
+      provider: value.provider,
+      sessionId: value.sessionId,
+    });
   }
 
   async function revoke(input: { refreshToken: string }): Promise<void> {
@@ -233,9 +215,9 @@ export function createAuth<
       return;
     }
 
-    const refreshTokenHash = await createHash(input.refreshToken);
+    const refreshTokenHash = await sha("SHA-256", input.refreshToken);
 
-    await options.storage.consume(getStorageKey('refresh', refreshTokenHash));
+    await options.storage.consume(getStorageKey("refresh", refreshTokenHash));
   }
 
   async function jwks() {
@@ -248,79 +230,58 @@ export function createAuth<
     requestId: string,
     flow: OAuthFlow,
   ): Promise<Response> {
-    if (request.method !== 'GET') {
-      return errorResponse(
-        requestId,
-        'route_not_found',
-        404,
-        'Auth route not found.',
-      );
+    if (request.method !== "GET") {
+      return errorResponse(requestId, "route_not_found", 404, "Auth route not found.");
     }
 
     const url = new URL(request.url);
-    const redirectURI = url.searchParams.get('redirect_uri');
-    const redirectURL =
-      redirectURI && URL.canParse(redirectURI) ? new URL(redirectURI) : null;
+    const redirectURI = url.searchParams.get("redirect_uri");
+    const redirectURL = redirectURI && URL.canParse(redirectURI) ? new URL(redirectURI) : null;
 
     if (
       !redirectURI ||
       !redirectURL ||
-      (redirectURL.protocol !== 'https:' && redirectURL.protocol !== 'http:')
+      (redirectURL.protocol !== "https:" && redirectURL.protocol !== "http:")
     ) {
-      return errorResponse(
-        requestId,
-        'redirect_uri_invalid',
-        400,
-        'redirect_uri is invalid.',
-      );
+      return errorResponse(requestId, "redirect_uri_invalid", 400, "redirect_uri is invalid.");
     }
 
-    const requestedState = url.searchParams.get('state');
+    const requestedState = url.searchParams.get("state");
 
     if (requestedState !== null && !isValidState(requestedState)) {
-      return errorResponse(
-        requestId,
-        'state_invalid',
-        400,
-        'state is invalid.',
-      );
+      return errorResponse(requestId, "state_invalid", 400, "state is invalid.");
     }
 
-    const codeChallenge = url.searchParams.get('code_challenge');
-    const codeChallengeMethod = url.searchParams.get('code_challenge_method');
+    const codeChallenge = url.searchParams.get("code_challenge");
+    const codeChallengeMethod = url.searchParams.get("code_challenge_method");
 
     if (
       !codeChallenge ||
-      codeChallengeMethod !== 'S256' ||
+      codeChallengeMethod !== "S256" ||
       codeChallenge.length !== 43 ||
       !/^[A-Za-z0-9_-]+$/.test(codeChallenge)
     ) {
       return errorResponse(
         requestId,
-        'code_challenge_invalid',
+        "code_challenge_invalid",
         400,
-        'Only a valid S256 code challenge is supported.',
+        "Only a valid S256 code challenge is supported.",
       );
     }
 
-    const scope = url.searchParams.get('scope');
+    const scope = url.searchParams.get("scope");
 
     if (scope && scope.length > 2048) {
-      return errorResponse(
-        requestId,
-        'scope_invalid',
-        400,
-        'scope is invalid.',
-      );
+      return errorResponse(requestId, "scope_invalid", 400, "scope is invalid.");
     }
 
     const clientState = requestedState ?? createRandomString(32);
     const providerState = createRandomString(48);
-    const providerStateHash = await createHash(providerState);
+    const providerStateHash = await sha("SHA-256", providerState);
     const callbackURL = `${issuer}/${providerId}/callback`;
 
     await options.storage.set(
-      getStorageKey('state', providerStateHash),
+      getStorageKey("state", providerStateHash),
       JSON.stringify({
         clientState,
         codeChallenge,
@@ -334,15 +295,12 @@ export function createAuth<
     const authorizationURL = await flow.authorizationUrl({
       callbackURL,
       request,
-      scopes: scope?.split(' ').filter(Boolean),
+      scopes: scope?.split(" ").filter(Boolean),
       state: providerState,
     });
 
-    if (
-      authorizationURL.protocol !== 'https:' &&
-      authorizationURL.protocol !== 'http:'
-    ) {
-      throw new Error('provider_authorization_url_invalid');
+    if (authorizationURL.protocol !== "https:" && authorizationURL.protocol !== "http:") {
+      throw new Error("provider_authorization_url_invalid");
     }
 
     return Response.redirect(authorizationURL, 302);
@@ -354,47 +312,24 @@ export function createAuth<
     requestId: string,
     flow: OAuthFlow,
   ): Promise<Response> {
-    if (request.method !== 'GET') {
-      return errorResponse(
-        requestId,
-        'route_not_found',
-        404,
-        'Auth route not found.',
-      );
+    if (request.method !== "GET") {
+      return errorResponse(requestId, "route_not_found", 404, "Auth route not found.");
     }
 
     const url = new URL(request.url);
-    const code = url.searchParams.get('code');
-    const state = url.searchParams.get('state');
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
 
     if (!code || !state || code.length > 4096 || !isValidState(state)) {
-      return errorResponse(
-        requestId,
-        'callback_invalid',
-        400,
-        'code and state are required.',
-      );
+      return errorResponse(requestId, "callback_invalid", 400, "code and state are required.");
     }
 
-    const stateHash = await createHash(state);
-    const storedValue = await options.storage.consume(
-      getStorageKey('state', stateHash),
-    );
-    const value: OAuthStateRecord | null = storedValue
-      ? JSON.parse(storedValue)
-      : null;
+    const stateHash = await sha("SHA-256", state);
+    const storedValue = await options.storage.consume(getStorageKey("state", stateHash));
+    const value: OAuthStateRecord | null = storedValue ? JSON.parse(storedValue) : null;
 
-    if (
-      !value ||
-      value.issuer !== issuer ||
-      value.provider !== providerId
-    ) {
-      return errorResponse(
-        requestId,
-        'state_invalid',
-        400,
-        'State is invalid or expired.',
-      );
+    if (!value || value.issuer !== issuer || value.provider !== providerId) {
+      return errorResponse(requestId, "state_invalid", 400, "State is invalid or expired.");
     }
 
     const identity = await flow.callback({
@@ -404,16 +339,12 @@ export function createAuth<
       state,
     });
 
-    const profile = await resolveProfile(
-      providerId as keyof Providers & string,
-      identity,
-      request,
-    );
+    const profile = await resolveProfile(providerId as keyof Providers & string, identity, request);
     const authorizationCode = `ac_${createRandomString(64)}`;
-    const authorizationCodeHash = await createHash(authorizationCode);
+    const authorizationCodeHash = await sha("SHA-256", authorizationCode);
 
     await options.storage.set(
-      getStorageKey('code', authorizationCodeHash),
+      getStorageKey("code", authorizationCodeHash),
       JSON.stringify({
         codeChallenge: value.codeChallenge,
         issuer,
@@ -426,8 +357,8 @@ export function createAuth<
 
     const redirectURL = new URL(value.redirectURI);
 
-    redirectURL.searchParams.set('code', authorizationCode);
-    redirectURL.searchParams.set('state', value.clientState);
+    redirectURL.searchParams.set("code", authorizationCode);
+    redirectURL.searchParams.set("state", value.clientState);
 
     return Response.redirect(redirectURL, 302);
   }
@@ -441,19 +372,10 @@ export function createAuth<
     const identity = await identityValue;
 
     if (!identity) {
-      return errorResponse(
-        requestId,
-        'authentication_failed',
-        401,
-        'Authentication failed.',
-      );
+      return errorResponse(requestId, "authentication_failed", 401, "Authentication failed.");
     }
 
-    const profile = await resolveProfile(
-      providerId as keyof Providers & string,
-      identity,
-      request,
-    );
+    const profile = await resolveProfile(providerId as keyof Providers & string, identity, request);
     const tokens = await createTokenPair({
       profile,
       provider: providerId,
@@ -462,10 +384,7 @@ export function createAuth<
     return jsonResponse(tokens);
   }
 
-  async function exchange(
-    request: Request,
-    requestId: string,
-  ): Promise<Response> {
+  async function exchange(request: Request, requestId: string): Promise<Response> {
     const body = await readJSON<{
       code?: unknown;
       codeVerifier?: unknown;
@@ -473,82 +392,56 @@ export function createAuth<
     }>(request);
 
     if (
-      typeof body?.code !== 'string' ||
-      typeof body.redirectURI !== 'string' ||
-      !body.code.startsWith('ac_')
+      typeof body?.code !== "string" ||
+      typeof body.redirectURI !== "string" ||
+      !body.code.startsWith("ac_")
     ) {
       return errorResponse(
         requestId,
-        'token_request_invalid',
+        "token_request_invalid",
         400,
-        'code and redirectURI are required.',
+        "code and redirectURI are required.",
       );
     }
 
-    const codeHash = await createHash(body.code);
-    const storedValue = await options.storage.consume(
-      getStorageKey('code', codeHash),
-    );
+    const codeHash = await sha("SHA-256", body.code);
+    const storedValue = await options.storage.consume(getStorageKey("code", codeHash));
     const value: AuthorizationCodeRecord<Profile> | null = storedValue
       ? JSON.parse(storedValue)
       : null;
 
-    if (
-      !value ||
-      value.issuer !== issuer ||
-      value.redirectURI !== body.redirectURI
-    ) {
+    if (!value || value.issuer !== issuer || value.redirectURI !== body.redirectURI) {
       return errorResponse(
         requestId,
-        'authorization_code_invalid',
+        "authorization_code_invalid",
         400,
-        'Authorization code is invalid or expired.',
+        "Authorization code is invalid or expired.",
       );
     }
 
-    if (typeof body.codeVerifier !== 'string') {
-      return errorResponse(
-        requestId,
-        'code_verifier_required',
-        400,
-        'codeVerifier is required.',
-      );
+    if (typeof body.codeVerifier !== "string") {
+      return errorResponse(requestId, "code_verifier_required", 400, "codeVerifier is required.");
     }
 
-    const challenge = await createHash(body.codeVerifier);
+    const challenge = await sha("SHA-256", body.codeVerifier);
 
     if (challenge !== value.codeChallenge) {
-      return errorResponse(
-        requestId,
-        'code_verifier_invalid',
-        400,
-        'codeVerifier is invalid.',
-      );
+      return errorResponse(requestId, "code_verifier_invalid", 400, "codeVerifier is invalid.");
     }
 
     return jsonResponse(
-      await createTokenPair(
-        {
-          profile: value.profile,
-          provider: value.provider,
-        },
-      ),
+      await createTokenPair({
+        profile: value.profile,
+        provider: value.provider,
+      }),
     );
   }
 
-  async function refreshRoute(
-    request: Request,
-    requestId: string,
-  ): Promise<Response> {
+  async function refreshRoute(request: Request, requestId: string): Promise<Response> {
     const body = await readJSON<{ refreshToken?: unknown }>(request);
 
-    if (typeof body?.refreshToken !== 'string') {
-      return errorResponse(
-        requestId,
-        'refresh_request_invalid',
-        400,
-        'refreshToken is required.',
-      );
+    if (typeof body?.refreshToken !== "string") {
+      return errorResponse(requestId, "refresh_request_invalid", 400, "refreshToken is required.");
     }
 
     const tokens = await refresh({
@@ -557,30 +450,17 @@ export function createAuth<
     });
 
     if (!tokens) {
-      return errorResponse(
-        requestId,
-        'refresh_token_invalid',
-        401,
-        'Refresh token is invalid.',
-      );
+      return errorResponse(requestId, "refresh_token_invalid", 401, "Refresh token is invalid.");
     }
 
     return jsonResponse(tokens);
   }
 
-  async function revokeRoute(
-    request: Request,
-    requestId: string,
-  ): Promise<Response> {
+  async function revokeRoute(request: Request, requestId: string): Promise<Response> {
     const body = await readJSON<{ refreshToken?: unknown }>(request);
 
-    if (typeof body?.refreshToken !== 'string') {
-      return errorResponse(
-        requestId,
-        'revoke_request_invalid',
-        400,
-        'refreshToken is required.',
-      );
+    if (typeof body?.refreshToken !== "string") {
+      return errorResponse(requestId, "revoke_request_invalid", 400, "refreshToken is required.");
     }
 
     await revoke({ refreshToken: body.refreshToken });
@@ -598,56 +478,42 @@ export function createAuth<
         if (
           requestURL.origin !== issuerURL.origin ||
           !issuerPath ||
-          (requestURL.pathname !== issuerPath &&
-            !requestURL.pathname.startsWith(`${issuerPath}/`))
+          (requestURL.pathname !== issuerPath && !requestURL.pathname.startsWith(`${issuerPath}/`))
         ) {
           return requestURL.pathname;
         }
 
-        return requestURL.pathname.slice(issuerPath.length) || '/';
+        return requestURL.pathname.slice(issuerPath.length) || "/";
       },
     });
 
-    router.use('*', async (context, next) => {
-      const suppliedRequestId = context.req.header('x-request-id');
+    router.use("*", async (context, next) => {
+      const suppliedRequestId = context.req.header("x-request-id");
       const requestId =
         suppliedRequestId && suppliedRequestId.length <= 128
           ? suppliedRequestId
           : createRandomString(24);
 
-      context.set('requestId', requestId);
+      context.set("requestId", requestId);
       await next();
-      context.header('x-request-id', requestId);
+      context.header("x-request-id", requestId);
     });
 
     router.onError((error, context) => {
       const requestId = context.var.requestId ?? createRandomString(24);
 
-      return createInternalErrorResponse(
-        error,
-        context.req.raw,
-        requestId,
-      );
+      return createInternalErrorResponse(error, context.req.raw, requestId);
     });
 
     router.notFound((context) =>
-      errorResponse(
-        context.var.requestId,
-        'route_not_found',
-        404,
-        'Auth route not found.',
-      ),
+      errorResponse(context.var.requestId, "route_not_found", 404, "Auth route not found."),
     );
-    router.post('/token', (context) =>
-      exchange(context.req.raw, context.var.requestId),
-    );
-    router.post('/token/refresh', (context) =>
+    router.post("/token", (context) => exchange(context.req.raw, context.var.requestId));
+    router.post("/token/refresh", (context) =>
       refreshRoute(context.req.raw, context.var.requestId),
     );
-    router.post('/token/revoke', (context) =>
-      revokeRoute(context.req.raw, context.var.requestId),
-    );
-    router.get('/.well-known/jwks.json', async () => jsonResponse(await jwks()));
+    router.post("/token/revoke", (context) => revokeRoute(context.req.raw, context.var.requestId));
+    router.get("/.well-known/jwks.json", async () => jsonResponse(await jwks()));
 
     for (const [providerId, provider] of Object.entries(options.providers)) {
       if (!/^[A-Za-z0-9._~-]+$/.test(providerId)) {
@@ -656,34 +522,17 @@ export function createAuth<
 
       const providerRouter = new Hono<ProviderEnvironment>();
 
-      providerRouter.use('*', async (context, next) => {
-        context.set('aurelian', {
+      providerRouter.use("*", async (context, next) => {
+        context.set("aurelian", {
           authenticate: (identity) =>
-            authenticate(
-              context.req.raw,
-              providerId,
-              context.var.requestId,
-              identity,
-            ),
-          authorize: (flow) =>
-            authorize(
-              context.req.raw,
-              providerId,
-              context.var.requestId,
-              flow,
-            ),
-          callback: (flow) =>
-            callback(
-              context.req.raw,
-              providerId,
-              context.var.requestId,
-              flow,
-            ),
+            authenticate(context.req.raw, providerId, context.var.requestId, identity),
+          authorize: (flow) => authorize(context.req.raw, providerId, context.var.requestId, flow),
+          callback: (flow) => callback(context.req.raw, providerId, context.var.requestId, flow),
           providerId,
         });
         await next();
       });
-      providerRouter.route('/', provider.router);
+      providerRouter.route("/", provider.router);
       router.route(`/${providerId}`, providerRouter);
     }
 
@@ -694,7 +543,7 @@ export function createAuth<
     try {
       return await app.fetch(request);
     } catch (error) {
-      const suppliedRequestId = request.headers.get('x-request-id');
+      const suppliedRequestId = request.headers.get("x-request-id");
       const requestId =
         suppliedRequestId && suppliedRequestId.length <= 128
           ? suppliedRequestId
@@ -719,24 +568,24 @@ export function createAuth<
 
     const response = errorResponse(
       requestId,
-      'internal_server_error',
+      "internal_server_error",
       500,
-      'Internal server error.',
+      "Internal server error.",
     );
 
-    response.headers.set('x-request-id', requestId);
+    response.headers.set("x-request-id", requestId);
     return response;
   }
 
   return { handler, issue, jwks, refresh, revoke, verify };
 }
 
-function getStorageKey(type: 'code' | 'refresh' | 'state', hash: string): string {
+function getStorageKey(type: "code" | "refresh" | "state", hash: string): string {
   return `aurelian:${type}:${hash}`;
 }
 
 function isRefreshToken(value: string): boolean {
-  return value.startsWith('rt_') && value.length === 67;
+  return value.startsWith("rt_") && value.length === 67;
 }
 
 function isValidState(value: string): boolean {
@@ -755,12 +604,7 @@ function jsonResponse(value: unknown, status = 200): Response {
   return Response.json(value, { status });
 }
 
-function errorResponse(
-  requestId: string,
-  code: string,
-  status: number,
-  message: string,
-): Response {
+function errorResponse(requestId: string, code: string, status: number, message: string): Response {
   return jsonResponse(
     {
       error: { code, message, status },

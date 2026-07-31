@@ -3,22 +3,18 @@ import {
   generateRegistrationOptions,
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
-} from '@simplewebauthn/server';
+} from "@simplewebauthn/server";
 import type {
   AuthenticationResponseJSON,
   AuthenticatorTransportFuture,
   RegistrationResponseJSON,
   WebAuthnCredential,
-} from '@simplewebauthn/server';
-import { Hono } from 'hono';
-import { createHash, createRandomString } from '../crypto.js';
-import type { ProviderIdentity } from '../profiles.js';
-import type { StorageAdapter } from '../storage/types.js';
-import type {
-  MaybePromise,
-  Provider,
-  ProviderEnvironment,
-} from '../types.js';
+} from "@simplewebauthn/server";
+import { Hono } from "hono";
+import { sha, createRandomString } from "../crypto.js";
+import type { ProviderIdentity } from "../profiles.js";
+import type { StorageAdapter } from "../storage/types.js";
+import type { MaybePromise, Provider, ProviderEnvironment } from "../types.js";
 
 export type PasskeyCredential = WebAuthnCredential & {
   identity: ProviderIdentity;
@@ -28,11 +24,11 @@ export type PasskeyState =
   | {
       challenge: string;
       identity: ProviderIdentity;
-      type: 'registration';
+      type: "registration";
     }
   | {
       challenge: string;
-      type: 'authentication';
+      type: "authentication";
     };
 
 export type PasskeyRegistrationUser = {
@@ -48,23 +44,23 @@ export type PasskeyRegistrationUser = {
 export type PasskeyProviderEvent =
   | {
       id: string;
-      type: 'credential';
+      type: "credential";
     }
   | {
       credential: WebAuthnCredential;
       identity: ProviderIdentity;
       request: Request;
-      type: 'credential-created';
+      type: "credential-created";
     }
   | {
       credentialId: string;
       currentCounter: number;
       newCounter: number;
-      type: 'counter-update';
+      type: "counter-update";
     }
   | {
       request: Request;
-      type: 'registration-user';
+      type: "registration-user";
     };
 
 export type PasskeyProviderResult =
@@ -90,7 +86,7 @@ export function passkey(options: PasskeyOptions): PasskeyProvider {
   const stateTtl = options.stateTtl ?? 5 * 60;
 
   if (!Number.isSafeInteger(stateTtl) || stateTtl <= 0) {
-    throw new RangeError('passkey.stateTtl must be a positive integer.');
+    throw new RangeError("passkey.stateTtl must be a positive integer.");
   }
 
   async function authenticate(
@@ -104,8 +100,8 @@ export function passkey(options: PasskeyOptions): PasskeyProvider {
 
     if (
       !body?.response ||
-      typeof body.response.id !== 'string' ||
-      typeof body.state !== 'string' ||
+      typeof body.response.id !== "string" ||
+      typeof body.state !== "string" ||
       body.state.length === 0 ||
       body.state.length > 512
     ) {
@@ -115,13 +111,11 @@ export function passkey(options: PasskeyOptions): PasskeyProvider {
     const state = await consumeState(providerId, request, body.state);
     const credentialResult = await options.handle({
       id: body.response.id,
-      type: 'credential',
+      type: "credential",
     });
-    const credential = isPasskeyCredential(credentialResult)
-      ? credentialResult
-      : null;
+    const credential = isPasskeyCredential(credentialResult) ? credentialResult : null;
 
-    if (state?.type !== 'authentication' || !credential) {
+    if (state?.type !== "authentication" || !credential) {
       return null;
     }
 
@@ -146,7 +140,7 @@ export function passkey(options: PasskeyOptions): PasskeyProvider {
         credentialId: credential.id,
         currentCounter: credential.counter,
         newCounter,
-        type: 'counter-update',
+        type: "counter-update",
       })) !== true
     ) {
       return null;
@@ -155,46 +149,42 @@ export function passkey(options: PasskeyOptions): PasskeyProvider {
     return credential.identity;
   }
 
-  router.get('/authentication/start', async (context) => {
+  router.get("/authentication/start", async (context) => {
     const request = context.req.raw;
     const authenticationOptions = await generateAuthenticationOptions({
       rpID: options.rpID,
-      userVerification: 'required',
+      userVerification: "required",
     });
-    const state = await createState(
-      context.var.aurelian.providerId,
-      request,
-      {
-        challenge: authenticationOptions.challenge,
-        type: 'authentication',
-      },
-    );
+    const state = await createState(context.var.aurelian.providerId, request, {
+      challenge: authenticationOptions.challenge,
+      type: "authentication",
+    });
 
     return Response.json({ options: authenticationOptions, state });
   });
 
-  router.post('/authentication/verify', (context) =>
+  router.post("/authentication/verify", (context) =>
     context.var.aurelian.authenticate(
       authenticate(context.req.raw, context.var.aurelian.providerId),
     ),
   );
 
-  router.post('/registration/start', async (context) => {
+  router.post("/registration/start", async (context) => {
     const request = context.req.raw;
     const userResult = await options.handle({
       request,
-      type: 'registration-user',
+      type: "registration-user",
     });
     const user = isRegistrationUser(userResult) ? userResult : null;
 
     if (!user) {
-      return new Response('Registration requires a session.', { status: 401 });
+      return new Response("Registration requires a session.", { status: 401 });
     }
 
     const registrationOptions = await generateRegistrationOptions({
       authenticatorSelection: {
-        residentKey: 'required',
-        userVerification: 'required',
+        residentKey: "required",
+        userVerification: "required",
       },
       excludeCredentials: user.excludeCredentials,
       rpID: options.rpID,
@@ -203,20 +193,16 @@ export function passkey(options: PasskeyOptions): PasskeyProvider {
       userID: new TextEncoder().encode(user.identity.id),
       userName: user.name,
     });
-    const state = await createState(
-      context.var.aurelian.providerId,
-      request,
-      {
-        challenge: registrationOptions.challenge,
-        identity: user.identity,
-        type: 'registration',
-      },
-    );
+    const state = await createState(context.var.aurelian.providerId, request, {
+      challenge: registrationOptions.challenge,
+      identity: user.identity,
+      type: "registration",
+    });
 
     return Response.json({ options: registrationOptions, state });
   });
 
-  router.post('/registration/verify', async (context) => {
+  router.post("/registration/verify", async (context) => {
     const request = context.req.raw;
     const body: {
       response?: RegistrationResponseJSON;
@@ -225,21 +211,17 @@ export function passkey(options: PasskeyOptions): PasskeyProvider {
 
     if (
       !body?.response ||
-      typeof body.state !== 'string' ||
+      typeof body.state !== "string" ||
       body.state.length === 0 ||
       body.state.length > 512
     ) {
-      return new Response('Passkey registration failed.', { status: 400 });
+      return new Response("Passkey registration failed.", { status: 400 });
     }
 
-    const state = await consumeState(
-      context.var.aurelian.providerId,
-      request,
-      body.state,
-    );
+    const state = await consumeState(context.var.aurelian.providerId, request, body.state);
 
-    if (state?.type !== 'registration') {
-      return new Response('Passkey registration failed.', { status: 400 });
+    if (state?.type !== "registration") {
+      return new Response("Passkey registration failed.", { status: 400 });
     }
 
     const verification = await verifyRegistrationResponse({
@@ -251,14 +233,14 @@ export function passkey(options: PasskeyOptions): PasskeyProvider {
     }).catch(() => null);
 
     if (!verification?.verified || !verification.registrationInfo) {
-      return new Response('Passkey registration failed.', { status: 400 });
+      return new Response("Passkey registration failed.", { status: 400 });
     }
 
     await options.handle({
       credential: verification.registrationInfo.credential,
       identity: state.identity,
       request,
-      type: 'credential-created',
+      type: "credential-created",
     });
 
     return Response.json({ verified: true });
@@ -270,15 +252,12 @@ export function passkey(options: PasskeyOptions): PasskeyProvider {
     value: PasskeyState,
   ): Promise<string> {
     const state = createRandomString(48);
-    const stateHash = await createHash(state);
+    const stateHash = await sha("SHA-256", state);
 
     await options.storage.set(
       getStateKey(providerId, stateHash),
       JSON.stringify({
-        authorization:
-          value.type === 'registration'
-            ? request.headers.get('authorization')
-            : null,
+        authorization: value.type === "registration" ? request.headers.get("authorization") : null,
         value,
       }),
       { ttl: stateTtl },
@@ -291,15 +270,13 @@ export function passkey(options: PasskeyOptions): PasskeyProvider {
     request: Request,
     state: string,
   ): Promise<PasskeyState | null> {
-    const stateHash = await createHash(state);
-    const serialized = await options.storage.consume(
-      getStateKey(providerId, stateHash),
-    );
+    const stateHash = await sha("SHA-256", state);
+    const serialized = await options.storage.consume(getStateKey(providerId, stateHash));
     const stored = parseStoredState(serialized);
 
     if (
-      stored?.value.type === 'registration' &&
-      stored.authorization !== request.headers.get('authorization')
+      stored?.value.type === "registration" &&
+      stored.authorization !== request.headers.get("authorization")
     ) {
       return null;
     }
@@ -318,125 +295,45 @@ function parseStoredState(value: string | null): {
     return null;
   }
 
-  const stored: unknown = JSON.parse(value);
-
-  if (
-    typeof stored !== 'object' ||
-    stored === null ||
-    !('authorization' in stored) ||
-    (stored.authorization !== null &&
-      typeof stored.authorization !== 'string') ||
-    !('value' in stored) ||
-    typeof stored.value !== 'object' ||
-    stored.value === null ||
-    !('challenge' in stored.value) ||
-    typeof stored.value.challenge !== 'string' ||
-    !('type' in stored.value)
-  ) {
-    return null;
-  }
-
-  if (stored.value.type === 'authentication') {
-    return {
-      authorization: stored.authorization,
-      value: {
-        challenge: stored.value.challenge,
-        type: stored.value.type,
-      },
-    };
-  }
-
-  if (
-    stored.value.type !== 'registration' ||
-    !('identity' in stored.value) ||
-    typeof stored.value.identity !== 'object' ||
-    stored.value.identity === null ||
-    !('id' in stored.value.identity) ||
-    typeof stored.value.identity.id !== 'string'
-  ) {
-    return null;
-  }
-
-  const identityValue = stored.value.identity;
-  const identity: ProviderIdentity = {
-    avatarUrl:
-      'avatarUrl' in identityValue && typeof identityValue.avatarUrl === 'string'
-        ? identityValue.avatarUrl
-        : undefined,
-    email:
-      'email' in identityValue && typeof identityValue.email === 'string'
-        ? identityValue.email
-        : undefined,
-    emailVerified:
-      'emailVerified' in identityValue &&
-      typeof identityValue.emailVerified === 'boolean'
-        ? identityValue.emailVerified
-        : undefined,
-    id:
-      'id' in identityValue && typeof identityValue.id === 'string'
-        ? identityValue.id
-        : '',
-    name:
-      'name' in identityValue && typeof identityValue.name === 'string'
-        ? identityValue.name
-        : undefined,
-    raw: 'raw' in identityValue ? identityValue.raw : undefined,
-    username:
-      'username' in identityValue && typeof identityValue.username === 'string'
-        ? identityValue.username
-        : undefined,
-  };
-
-  return {
-    authorization: stored.authorization,
-    value: {
-      challenge: stored.value.challenge,
-      identity,
-      type: stored.value.type,
-    },
-  };
+  return JSON.parse(value);
 }
 
 function getStateKey(providerId: string, stateHash: string): string {
   return `aurelian:provider:${providerId}:passkey:${stateHash}`;
 }
 
-function isPasskeyCredential(
-  value: PasskeyProviderResult,
-): value is PasskeyCredential {
+function isPasskeyCredential(value: PasskeyProviderResult): value is PasskeyCredential {
   return (
-    typeof value === 'object' &&
+    typeof value === "object" &&
     value !== null &&
-    'counter' in value &&
-    typeof value.counter === 'number' &&
-    'id' in value &&
-    typeof value.id === 'string' &&
-    'identity' in value &&
+    "counter" in value &&
+    typeof value.counter === "number" &&
+    "id" in value &&
+    typeof value.id === "string" &&
+    "identity" in value &&
     isProviderIdentity(value.identity) &&
-    'publicKey' in value &&
+    "publicKey" in value &&
     value.publicKey instanceof Uint8Array
   );
 }
 
-function isRegistrationUser(
-  value: PasskeyProviderResult,
-): value is PasskeyRegistrationUser {
+function isRegistrationUser(value: PasskeyProviderResult): value is PasskeyRegistrationUser {
   return (
-    typeof value === 'object' &&
+    typeof value === "object" &&
     value !== null &&
-    'identity' in value &&
+    "identity" in value &&
     isProviderIdentity(value.identity) &&
-    'name' in value &&
-    typeof value.name === 'string'
+    "name" in value &&
+    typeof value.name === "string"
   );
 }
 
 function isProviderIdentity(value: unknown): value is ProviderIdentity {
   return (
-    typeof value === 'object' &&
+    typeof value === "object" &&
     value !== null &&
-    'id' in value &&
-    typeof value.id === 'string' &&
+    "id" in value &&
+    typeof value.id === "string" &&
     value.id.length > 0
   );
 }

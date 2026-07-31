@@ -1,14 +1,14 @@
-import type { Hono } from 'hono';
-import type { JWK, JWTPayload } from 'jose';
+import type { Hono } from "hono";
+import type { JWK, JWTPayload } from "jose";
 import type {
   ProfilePayload,
   ProfileResolver,
   ProfileSchema,
   ProviderIdentity,
-} from './profiles.js';
-import type { StorageAdapter } from './storage/types.js';
+} from "./profiles.js";
+import type { StorageAdapter } from "./storage/types.js";
 
-export type { ProviderIdentity } from './profiles.js';
+export type { ProviderIdentity } from "./profiles.js";
 
 export type MaybePromise<Value> = Value | Promise<Value>;
 
@@ -28,9 +28,7 @@ export type OAuthFlow = {
 };
 
 export type ProviderLifecycle = {
-  authenticate(
-    identity: MaybePromise<ProviderIdentity | null>,
-  ): Promise<Response>;
+  authenticate(identity: MaybePromise<ProviderIdentity | null>): Promise<Response>;
   authorize(flow: OAuthFlow): Promise<Response>;
   callback(flow: OAuthFlow): Promise<Response>;
   providerId: string;
@@ -52,20 +50,19 @@ export type Session<Profile> = {
   expiresAt: number;
   id: string;
   profile: Profile;
-  provider: string;
 };
 
 export type TokenResponse = {
   accessToken: string;
   expiresIn: number;
   refreshToken: string;
-  tokenType: 'Bearer';
+  tokenType: "Bearer";
 };
 
 export type AccessTokenClaims<Profile> = JWTPayload & {
   profile: Profile;
   sid: string;
-  typ: 'access';
+  typ: "access";
 };
 
 export type VerifyResult<Profile> =
@@ -75,7 +72,7 @@ export type VerifyResult<Profile> =
       valid: true;
     }
   | {
-      reason: 'token_invalid';
+      reason: "token_invalid";
       valid: false;
     };
 
@@ -92,10 +89,13 @@ export type CreateAuthOptions<
     ttl?: number;
   };
   issuer: string;
-  onError?(error: unknown, context: {
-    request: Request;
-    requestId: string;
-  }): MaybePromise<void>;
+  onError?(
+    error: unknown,
+    context: {
+      request: Request;
+      requestId: string;
+    },
+  ): MaybePromise<void>;
   profiles: Profiles;
   providers: Providers;
   refresh?: {
@@ -125,10 +125,7 @@ export type Auth<Profile> = {
   handler(request: Request): Promise<Response>;
   issue(input: IssueInput<Profile>): Promise<TokenResponse>;
   jwks(): Promise<{ keys: JWK[] }>;
-  refresh(input: {
-    refreshToken: string;
-    request?: Request;
-  }): Promise<TokenResponse | null>;
+  refresh(input: { refreshToken: string; request?: Request }): Promise<TokenResponse | null>;
   revoke(input: { refreshToken: string }): Promise<void>;
   verify(accessToken: string): Promise<VerifyResult<Profile>>;
 };

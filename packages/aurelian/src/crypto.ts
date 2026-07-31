@@ -6,41 +6,44 @@ import {
   importSPKI,
   jwtVerify,
   SignJWT,
-} from 'jose';
-import type { JWK } from 'jose';
-import type {
-  AccessTokenClaims,
-  MaybePromise,
-  Session,
-  VerifyResult,
-} from './types.js';
+} from "jose";
+import type { JWK } from "jose";
+import type { AccessTokenClaims, MaybePromise, Session, VerifyResult } from "./types.js";
 
 const RESERVED_CLAIMS = new Set([
-  'aud',
-  'exp',
-  'iat',
-  'iss',
-  'jti',
-  'nbf',
-  'profile',
-  'sid',
-  'sub',
-  'typ',
+  "aud",
+  "exp",
+  "iat",
+  "iss",
+  "jti",
+  "nbf",
+  "profile",
+  "sid",
+  "sub",
+  "typ",
 ]);
 
 export function createRandomString(length: number): string {
-  const bytes = new Uint8Array(Math.ceil((length * 3) / 4));
+  if (!Number.isSafeInteger(length) || length <= 0) {
+    throw new TypeError("length must be a positive integer");
+  }
 
-  globalThis.crypto.getRandomValues(bytes);
+  const requiredBytes = Math.ceil((length * 3) / 4);
+  const buffer = new Uint8Array(requiredBytes);
 
-  return base64url.encode(bytes).slice(0, length);
+  crypto.getRandomValues(buffer);
+
+  return base64url.encode(buffer).slice(0, length);
 }
 
-export async function createHash(value: string): Promise<string> {
-  const bytes = new TextEncoder().encode(value);
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+type ShaAlgorithm = "SHA-1" | "SHA-256" | "SHA-384" | "SHA-512";
 
-  return base64url.encode(new Uint8Array(digest));
+export async function sha(algorithm: ShaAlgorithm, input: string | Uint8Array): Promise<string> {
+  const encodedInput = input instanceof Uint8Array ? input : new TextEncoder().encode(input);
+  const data = new Uint8Array(encodedInput);
+  const buffer = await crypto.subtle.digest(algorithm, data);
+
+  return base64url.encode(new Uint8Array(buffer));
 }
 
 export function createTokenService<Profile>(options: {
@@ -60,13 +63,12 @@ export function createTokenService<Profile>(options: {
       importSPKI(options.publicKey, options.algorithm),
     ]);
     const exportedPublicKey = await exportJWK(publicKey);
-    const keyId =
-      options.keyId ?? (await calculateJwkThumbprint(exportedPublicKey));
+    const keyId = options.keyId ?? (await calculateJwkThumbprint(exportedPublicKey));
     const publicJWK: JWK = {
       ...exportedPublicKey,
       alg: options.algorithm,
       kid: keyId,
-      use: 'sig',
+      use: "sig",
     };
 
     return { keyId, privateKey, publicJWK, publicKey };
@@ -99,9 +101,9 @@ export function createTokenService<Profile>(options: {
         ...customClaims,
         profile: input.profile,
         sid: input.session.id,
-        typ: 'access',
+        typ: "access",
       })
-        .setProtectedHeader({ alg: options.algorithm, kid: keyId, typ: 'JWT' })
+        .setProtectedHeader({ alg: options.algorithm, kid: keyId, typ: "JWT" })
         .setIssuer(input.issuer)
         .setSubject(input.profileId)
         .setIssuedAt(now)
@@ -120,35 +122,23 @@ export function createTokenService<Profile>(options: {
 
       return { keys: [{ ...publicJWK }] };
     },
-    async verify(
-      accessToken: string,
-      issuer: string,
-    ): Promise<VerifyResult<Profile>> {
+    async verify(accessToken: string, issuer: string): Promise<VerifyResult<Profile>> {
       try {
         const { publicKey } = await signingKeyPromise;
         const result = await jwtVerify(accessToken, publicKey, {
           algorithms: [options.algorithm],
           audience: options.audience,
           issuer,
-          requiredClaims: [
-            'exp',
-            'iat',
-            'jti',
-            'nbf',
-            'profile',
-            'sid',
-            'sub',
-            'typ',
-          ],
-          typ: 'JWT',
+          requiredClaims: ["exp", "iat", "jti", "nbf", "profile", "sid", "sub", "typ"],
+          typ: "JWT",
         });
 
         if (
-          result.payload.typ !== 'access' ||
-          typeof result.payload.sid !== 'string' ||
+          result.payload.typ !== "access" ||
+          typeof result.payload.sid !== "string" ||
           result.payload.profile === undefined
         ) {
-          return { reason: 'token_invalid', valid: false };
+          return { reason: "token_invalid", valid: false };
         }
 
         const profile = result.payload.profile as Profile;
@@ -161,7 +151,7 @@ export function createTokenService<Profile>(options: {
 
         return { claims, profile, valid: true };
       } catch {
-        return { reason: 'token_invalid', valid: false };
+        return { reason: "token_invalid", valid: false };
       }
     },
   };

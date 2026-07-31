@@ -1,13 +1,9 @@
-import { Hono } from 'hono';
-import { base64url } from 'jose';
-import { createHash, createRandomString } from '../crypto.js';
-import type { ProviderIdentity } from '../profiles.js';
-import type { StorageAdapter } from '../storage/types.js';
-import type {
-  MaybePromise,
-  Provider,
-  ProviderEnvironment,
-} from '../types.js';
+import { Hono } from "hono";
+import { base64url } from "jose";
+import { sha, createRandomString } from "../crypto.js";
+import type { ProviderIdentity } from "../profiles.js";
+import type { StorageAdapter } from "../storage/types.js";
+import type { MaybePromise, Provider, ProviderEnvironment } from "../types.js";
 
 const DEFAULT_CODE_TTL = 10 * 60;
 const DEFAULT_ITERATIONS = 600_000;
@@ -17,24 +13,21 @@ type RegistrationState = {
   codeHash: string;
   identifier: string;
   passwordHash: string;
-  type: 'registration';
+  type: "registration";
 };
 
 type PasswordResetCodeState = {
   codeHash: string;
   identifier: string;
-  type: 'password-reset-code';
+  type: "password-reset-code";
 };
 
 type PasswordResetState = {
   identifier: string;
-  type: 'password-reset';
+  type: "password-reset";
 };
 
-type PasswordState =
-  | PasswordResetCodeState
-  | PasswordResetState
-  | RegistrationState;
+type PasswordState = PasswordResetCodeState | PasswordResetState | RegistrationState;
 
 export type PasswordHasher = {
   hash(password: string): MaybePromise<string>;
@@ -50,40 +43,33 @@ export type PasswordProviderEvent =
   | {
       identifier: string;
       request: Request;
-      type: 'account';
+      type: "account";
     }
   | {
       code: string;
       identifier: string;
-      purpose: 'password-reset' | 'registration';
+      purpose: "password-reset" | "registration";
       request: Request;
-      type: 'send-code';
+      type: "send-code";
     }
   | {
       identifier: string;
       passwordHash: string;
       request: Request;
-      type: 'registration';
+      type: "registration";
     }
   | {
       identifier: string;
       passwordHash: string;
       request: Request;
-      type: 'password-reset';
+      type: "password-reset";
     };
 
-export type PasswordProviderResult =
-  | PasswordAccount
-  | ProviderIdentity
-  | boolean
-  | null
-  | void;
+export type PasswordProviderResult = PasswordAccount | ProviderIdentity | boolean | null | void;
 
 export type PasswordOptions = {
   codeTtl?: number;
-  handle(
-    event: PasswordProviderEvent,
-  ): MaybePromise<PasswordProviderResult>;
+  handle(event: PasswordProviderEvent): MaybePromise<PasswordProviderResult>;
   hasher?: PasswordHasher;
   normalizeIdentifier?(identifier: string): string;
   resetTtl?: number;
@@ -98,11 +84,11 @@ export function password(options: PasswordOptions): Provider {
   const router = new Hono<ProviderEnvironment>();
 
   if (!Number.isSafeInteger(codeTtl) || codeTtl <= 0) {
-    throw new RangeError('password.codeTtl must be a positive integer.');
+    throw new RangeError("password.codeTtl must be a positive integer.");
   }
 
   if (!Number.isSafeInteger(resetTtl) || resetTtl <= 0) {
-    throw new RangeError('password.resetTtl must be a positive integer.');
+    throw new RangeError("password.resetTtl must be a positive integer.");
   }
 
   function normalizeIdentifier(identifier: string): string {
@@ -111,13 +97,13 @@ export function password(options: PasswordOptions): Provider {
 
   async function validatePassword(password: string): Promise<string | null> {
     if (!password || password.length > 1024) {
-      return 'Password is invalid.';
+      return "Password is invalid.";
     }
 
     return (await options.validatePassword?.(password)) ?? null;
   }
 
-  router.post('/authenticate', async (context) => {
+  router.post("/authenticate", async (context) => {
     const request = context.req.raw;
     const body = await readCredentials(request);
 
@@ -129,55 +115,47 @@ export function password(options: PasswordOptions): Provider {
     const accountResult = await options.handle({
       identifier,
       request,
-      type: 'account',
+      type: "account",
     });
     const account = isPasswordAccount(accountResult) ? accountResult : null;
-    const isValid = account
-      ? await hasher.verify(body.password, account.passwordHash)
-      : false;
+    const isValid = account ? await hasher.verify(body.password, account.passwordHash) : false;
 
-    return context.var.aurelian.authenticate(
-      isValid ? account?.identity ?? null : null,
-    );
+    return context.var.aurelian.authenticate(isValid ? (account?.identity ?? null) : null);
   });
 
-  router.post('/registration/start', async (context) => {
+  router.post("/registration/start", async (context) => {
     const request = context.req.raw;
     const body = await readCredentials(request);
 
     if (!body) {
-      return passwordError('registration_invalid', 400, 'Registration is invalid.');
+      return passwordError("registration_invalid", 400, "Registration is invalid.");
     }
 
     const identifier = normalizeIdentifier(body.identifier);
     const validationError = await validatePassword(body.password);
 
     if (validationError) {
-      return passwordError('password_invalid', 400, validationError);
+      return passwordError("password_invalid", 400, validationError);
     }
 
     const account = await options.handle({
       identifier,
       request,
-      type: 'account',
+      type: "account",
     });
 
     if (isPasswordAccount(account)) {
-      return passwordError(
-        'identifier_unavailable',
-        409,
-        'Identifier is unavailable.',
-      );
+      return passwordError("identifier_unavailable", 409, "Identifier is unavailable.");
     }
 
     const code = createVerificationCode();
     const state = await createState(
       context.var.aurelian.providerId,
       {
-        codeHash: await createHash(code),
+        codeHash: await sha("SHA-256", code),
         identifier,
         passwordHash: await hasher.hash(body.password),
-        type: 'registration',
+        type: "registration",
       },
       codeTtl,
     );
@@ -185,53 +163,41 @@ export function password(options: PasswordOptions): Provider {
     await options.handle({
       code,
       identifier,
-      purpose: 'registration',
+      purpose: "registration",
       request,
-      type: 'send-code',
+      type: "send-code",
     });
     return Response.json({ state });
   });
 
-  router.post('/registration/verify', async (context) => {
+  router.post("/registration/verify", async (context) => {
     const request = context.req.raw;
     const body = await readCode(request);
-    const state = body
-      ? await consumeState(context.var.aurelian.providerId, body.state)
-      : null;
+    const state = body ? await consumeState(context.var.aurelian.providerId, body.state) : null;
 
     if (
-      state?.type !== 'registration' ||
-      (await createHash(body?.code ?? '')) !== state.codeHash
+      state?.type !== "registration" ||
+      (await sha("SHA-256", body?.code ?? "")) !== state.codeHash
     ) {
-      return passwordError(
-        'registration_invalid',
-        400,
-        'Registration is invalid or expired.',
-      );
+      return passwordError("registration_invalid", 400, "Registration is invalid or expired.");
     }
 
     const result = await options.handle({
       identifier: state.identifier,
       passwordHash: state.passwordHash,
       request,
-      type: 'registration',
+      type: "registration",
     });
 
-    return context.var.aurelian.authenticate(
-      isProviderIdentity(result) ? result : null,
-    );
+    return context.var.aurelian.authenticate(isProviderIdentity(result) ? result : null);
   });
 
-  router.post('/password-reset/start', async (context) => {
+  router.post("/password-reset/start", async (context) => {
     const request = context.req.raw;
     const identifier = await readIdentifier(request);
 
     if (!identifier) {
-      return passwordError(
-        'password_reset_invalid',
-        400,
-        'Password reset is invalid.',
-      );
+      return passwordError("password_reset_invalid", 400, "Password reset is invalid.");
     }
 
     const normalized = normalizeIdentifier(identifier);
@@ -239,9 +205,9 @@ export function password(options: PasswordOptions): Provider {
     const state = await createState(
       context.var.aurelian.providerId,
       {
-        codeHash: await createHash(code),
+        codeHash: await sha("SHA-256", code),
         identifier: normalized,
-        type: 'password-reset-code',
+        type: "password-reset-code",
       },
       codeTtl,
     );
@@ -249,68 +215,58 @@ export function password(options: PasswordOptions): Provider {
     await options.handle({
       code,
       identifier: normalized,
-      purpose: 'password-reset',
+      purpose: "password-reset",
       request,
-      type: 'send-code',
+      type: "send-code",
     });
     return Response.json({ state });
   });
 
-  router.post('/password-reset/verify', async (context) => {
+  router.post("/password-reset/verify", async (context) => {
     const body = await readCode(context.req.raw);
-    const state = body
-      ? await consumeState(context.var.aurelian.providerId, body.state)
-      : null;
+    const state = body ? await consumeState(context.var.aurelian.providerId, body.state) : null;
 
     if (
-      state?.type !== 'password-reset-code' ||
-      (await createHash(body?.code ?? '')) !== state.codeHash
+      state?.type !== "password-reset-code" ||
+      (await sha("SHA-256", body?.code ?? "")) !== state.codeHash
     ) {
-      return passwordError(
-        'password_reset_invalid',
-        400,
-        'Password reset is invalid or expired.',
-      );
+      return passwordError("password_reset_invalid", 400, "Password reset is invalid or expired.");
     }
 
     const nextState = await createState(
       context.var.aurelian.providerId,
-      { identifier: state.identifier, type: 'password-reset' },
+      { identifier: state.identifier, type: "password-reset" },
       resetTtl,
     );
 
     return Response.json({ state: nextState });
   });
 
-  router.post('/password-reset/complete', async (context) => {
+  router.post("/password-reset/complete", async (context) => {
     const request = context.req.raw;
     const body: { password?: unknown; state?: unknown } | null = await request
       .json()
       .catch(() => null);
     const state =
-      typeof body?.state === 'string'
+      typeof body?.state === "string"
         ? await consumeState(context.var.aurelian.providerId, body.state)
         : null;
 
-    if (state?.type !== 'password-reset' || typeof body?.password !== 'string') {
-      return passwordError(
-        'password_reset_invalid',
-        400,
-        'Password reset is invalid or expired.',
-      );
+    if (state?.type !== "password-reset" || typeof body?.password !== "string") {
+      return passwordError("password_reset_invalid", 400, "Password reset is invalid or expired.");
     }
 
     const validationError = await validatePassword(body.password);
 
     if (validationError) {
-      return passwordError('password_invalid', 400, validationError);
+      return passwordError("password_invalid", 400, validationError);
     }
 
     await options.handle({
       identifier: state.identifier,
       passwordHash: await hasher.hash(body.password),
       request,
-      type: 'password-reset',
+      type: "password-reset",
     });
     return Response.json({ reset: true });
   });
@@ -321,25 +277,18 @@ export function password(options: PasswordOptions): Provider {
     ttl: number,
   ): Promise<string> {
     const state = createRandomString(48);
-    const stateHash = await createHash(state);
+    const stateHash = await sha("SHA-256", state);
 
-    await options.storage.set(
-      getStateKey(providerId, stateHash),
-      JSON.stringify(value),
-      { ttl },
-    );
+    await options.storage.set(getStateKey(providerId, stateHash), JSON.stringify(value), { ttl });
     return state;
   }
 
-  async function consumeState(
-    providerId: string,
-    state: string,
-  ): Promise<PasswordState | null> {
+  async function consumeState(providerId: string, state: string): Promise<PasswordState | null> {
     if (!state || state.length > 512) {
       return null;
     }
 
-    const stateHash = await createHash(state);
+    const stateHash = await sha("SHA-256", state);
     const value = await options.storage.consume(getStateKey(providerId, stateHash));
 
     return parseState(value);
@@ -348,13 +297,11 @@ export function password(options: PasswordOptions): Provider {
   return { router };
 }
 
-export function pbkdf2PasswordHasher(options?: {
-  iterations?: number;
-}): PasswordHasher {
+export function pbkdf2PasswordHasher(options?: { iterations?: number }): PasswordHasher {
   const iterations = options?.iterations ?? DEFAULT_ITERATIONS;
 
   if (!Number.isSafeInteger(iterations) || iterations <= 0) {
-    throw new RangeError('password.iterations must be a positive integer.');
+    throw new RangeError("password.iterations must be a positive integer.");
   }
 
   return {
@@ -365,12 +312,11 @@ export function pbkdf2PasswordHasher(options?: {
       return `pbkdf2-sha256$${iterations}$${base64url.encode(salt)}$${base64url.encode(hash)}`;
     },
     async verify(password, passwordHash) {
-      const [algorithm, iterationsValue, saltValue, expectedValue] =
-        passwordHash.split('$');
+      const [algorithm, iterationsValue, saltValue, expectedValue] = passwordHash.split("$");
       const parsedIterations = Number(iterationsValue);
 
       if (
-        algorithm !== 'pbkdf2-sha256' ||
+        algorithm !== "pbkdf2-sha256" ||
         !Number.isSafeInteger(parsedIterations) ||
         parsedIterations <= 0 ||
         !saltValue ||
@@ -379,11 +325,7 @@ export function pbkdf2PasswordHasher(options?: {
         return false;
       }
 
-      const actual = await derivePassword(
-        password,
-        base64url.decode(saltValue),
-        parsedIterations,
-      );
+      const actual = await derivePassword(password, base64url.decode(saltValue), parsedIterations);
 
       return timingSafeEqual(actual, base64url.decode(expectedValue));
     },
@@ -397,14 +339,14 @@ async function derivePassword(
 ): Promise<Uint8Array> {
   const normalizedSalt = new Uint8Array(salt);
   const material = await crypto.subtle.importKey(
-    'raw',
+    "raw",
     new TextEncoder().encode(password),
-    'PBKDF2',
+    "PBKDF2",
     false,
-    ['deriveBits'],
+    ["deriveBits"],
   );
   const value = await crypto.subtle.deriveBits(
-    { hash: 'SHA-256', iterations, name: 'PBKDF2', salt: normalizedSalt },
+    { hash: "SHA-256", iterations, name: "PBKDF2", salt: normalizedSalt },
     material,
     256,
   );
@@ -435,7 +377,7 @@ function createVerificationCode(): string {
     crypto.getRandomValues(values);
   } while ((values[0] ?? 0) >= limit);
 
-  return String((values[0] ?? 0) % maximum).padStart(6, '0');
+  return String((values[0] ?? 0) % maximum).padStart(6, "0");
 }
 
 async function readCredentials(request: Request): Promise<{
@@ -447,10 +389,10 @@ async function readCredentials(request: Request): Promise<{
     .catch(() => null);
 
   if (
-    typeof body?.identifier !== 'string' ||
+    typeof body?.identifier !== "string" ||
     body.identifier.length === 0 ||
     body.identifier.length > 512 ||
-    typeof body.password !== 'string' ||
+    typeof body.password !== "string" ||
     body.password.length === 0 ||
     body.password.length > 1024
   ) {
@@ -461,11 +403,9 @@ async function readCredentials(request: Request): Promise<{
 }
 
 async function readIdentifier(request: Request): Promise<string | null> {
-  const body: { identifier?: unknown } | null = await request
-    .json()
-    .catch(() => null);
+  const body: { identifier?: unknown } | null = await request.json().catch(() => null);
 
-  return typeof body?.identifier === 'string' &&
+  return typeof body?.identifier === "string" &&
     body.identifier.length > 0 &&
     body.identifier.length <= 512
     ? body.identifier
@@ -476,14 +416,12 @@ async function readCode(request: Request): Promise<{
   code: string;
   state: string;
 } | null> {
-  const body: { code?: unknown; state?: unknown } | null = await request
-    .json()
-    .catch(() => null);
+  const body: { code?: unknown; state?: unknown } | null = await request.json().catch(() => null);
 
   if (
-    typeof body?.code !== 'string' ||
+    typeof body?.code !== "string" ||
     !/^\d{6}$/.test(body.code) ||
-    typeof body.state !== 'string' ||
+    typeof body.state !== "string" ||
     body.state.length === 0 ||
     body.state.length > 512
   ) {
@@ -501,28 +439,28 @@ function parseState(value: string | null): PasswordState | null {
   const state: unknown = JSON.parse(value);
 
   if (
-    typeof state !== 'object' ||
+    typeof state !== "object" ||
     state === null ||
-    !('type' in state) ||
-    !('identifier' in state) ||
-    typeof state.identifier !== 'string'
+    !("type" in state) ||
+    !("identifier" in state) ||
+    typeof state.identifier !== "string"
   ) {
     return null;
   }
 
-  if (state.type === 'password-reset') {
+  if (state.type === "password-reset") {
     return { identifier: state.identifier, type: state.type };
   }
 
   if (
-    (state.type === 'registration' || state.type === 'password-reset-code') &&
-    'codeHash' in state &&
-    typeof state.codeHash === 'string'
+    (state.type === "registration" || state.type === "password-reset-code") &&
+    "codeHash" in state &&
+    typeof state.codeHash === "string"
   ) {
     if (
-      state.type === 'registration' &&
-      'passwordHash' in state &&
-      typeof state.passwordHash === 'string'
+      state.type === "registration" &&
+      "passwordHash" in state &&
+      typeof state.passwordHash === "string"
     ) {
       return {
         codeHash: state.codeHash,
@@ -532,7 +470,7 @@ function parseState(value: string | null): PasswordState | null {
       };
     }
 
-    if (state.type === 'password-reset-code') {
+    if (state.type === "password-reset-code") {
       return {
         codeHash: state.codeHash,
         identifier: state.identifier,
@@ -546,21 +484,21 @@ function parseState(value: string | null): PasswordState | null {
 
 function isPasswordAccount(value: PasswordProviderResult): value is PasswordAccount {
   return (
-    typeof value === 'object' &&
+    typeof value === "object" &&
     value !== null &&
-    'identity' in value &&
+    "identity" in value &&
     isProviderIdentity(value.identity) &&
-    'passwordHash' in value &&
-    typeof value.passwordHash === 'string'
+    "passwordHash" in value &&
+    typeof value.passwordHash === "string"
   );
 }
 
 function isProviderIdentity(value: unknown): value is ProviderIdentity {
   return (
-    typeof value === 'object' &&
+    typeof value === "object" &&
     value !== null &&
-    'id' in value &&
-    typeof value.id === 'string' &&
+    "id" in value &&
+    typeof value.id === "string" &&
     value.id.length > 0
   );
 }
