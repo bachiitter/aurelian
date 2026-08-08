@@ -21,9 +21,10 @@ description: Review every public export, route, and contract
 | `aurelian/providers/twitch` | `twitch` |
 | `aurelian/profiles` | `defineProfiles`, `validateProfile` |
 | `aurelian/server` | `createAuth` |
-| `aurelian/storage` | `cloudflareKVStorage` |
+| `aurelian/storage` | `cloudflareKVStorage`, `sqliteStorage` |
 | `aurelian/storage/cloudflare-kv` | `cloudflareKVStorage` |
 | `aurelian/storage/memory` | `memoryStorage` |
+| `aurelian/storage/sqlite` | `sqliteStorage` |
 
 The package also exports `aurelian/package.json`. All JavaScript entry points are ESM.
 
@@ -182,10 +183,14 @@ type GoogleOptions = {
 }
 
 type GitHubOptions = {
+  apiURL?: string
+  authorizationURL?: string
   clientId: string
   clientSecret: string
+  enterpriseURL?: string
   fetch?: typeof fetch
   scopes?: string[]
+  tokenURL?: string
 }
 
 type DiscordOptions = {
@@ -206,6 +211,8 @@ type TwitchOptions = {
 `google`, `github`, `discord`, and `twitch` are runtime exports. Their type exports are `GoogleOptions`, `GitHubOptions`, `DiscordOptions`, and `TwitchOptions`.
 
 The callback is `${issuer}/<provider-key>/callback`. Default scopes are `openid email profile` for Google, `read:user user:email` for GitHub, `identify email` for Discord, and `user:read:email` for Twitch.
+
+GitHub defaults to `https://github.com` and `https://api.github.com`. Set `enterpriseURL` to use GitHub Enterprise Server, or override `authorizationURL`, `tokenURL`, and `apiURL` separately.
 
 Configured and request-level scopes are appended and deduplicated. Google's optional `fetch` replaces `globalThis.fetch` for token exchange and UserInfo loading.
 
@@ -688,9 +695,11 @@ type StorageAdapter = {
 
 `consume` returns and deletes one string, or returns `null`. `StorageAdapter` is exported from `aurelian/storage`.
 
-`memoryStorage()` from `aurelian/storage/memory` and `cloudflareKVStorage(namespace)` from `aurelian/storage/cloudflare-kv` both return `StorageAdapter`. The Cloudflare factory and `CloudflareKVNamespace` type are also exported from `aurelian/storage`.
+`memoryStorage()` from `aurelian/storage/memory`, `cloudflareKVStorage(namespace)` from `aurelian/storage/cloudflare-kv`, and `sqliteStorage({ db })` from `aurelian/storage/sqlite` return `StorageAdapter`. The Cloudflare and SQLite factories are also exported from `aurelian/storage`.
 
 The Cloudflare adapter throws a `RangeError` when `options.ttl` is below 60 seconds because Workers KV requires at least 60 seconds.
+
+`sqliteStorage({ db, tableName })` accepts a SQLite-like database with `prepare` and optional `exec`. `tableName` defaults to `aurelian_storage` and must contain only letters, numbers, and underscores.
 
 Workers KV cannot atomically read and delete, so its adapter does not provide strict replay protection. Use Durable Objects or other strongly consistent storage where replay protection matters.
 

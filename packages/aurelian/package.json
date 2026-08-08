@@ -1,7 +1,7 @@
 {
   "name": "aurelian",
   "type": "module",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Just another auth library.",
   "author": "Bachitter Chahal <hello@bachitter.dev>",
   "license": "MIT",
@@ -44,6 +44,7 @@
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
+    "smoke:dist": "node scripts/smoke-dist.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm run build"

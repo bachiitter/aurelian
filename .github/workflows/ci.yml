@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.0.0
+      - uses: actions/setup-node@v6
+        with:
+          cache: pnpm
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter aurelian typecheck
+      - run: pnpm --filter aurelian test
+      - run: pnpm --filter aurelian build
+      - run: pnpm --filter aurelian smoke:dist

@@ -18,7 +18,8 @@
     "dev": "turbo run dev",
     "dev:examples": "turbo run dev --filter='aurelian-example-client-react' --filter='aurelian-example-issuer-cloudflare'",
     "build": "turbo run build",
-    "deploy:docs": "pnpm --filter aurelian-docs exec blume build --isolated --output static && wrangler deploy --assets packages/docs/.blume-verify/dist --name aurelian-docs --compatibility-date 2026-07-22"
+    "deploy:docs": "pnpm --filter aurelian-docs exec blume build --isolated --output static && wrangler deploy --assets packages/docs/.blume-verify/dist --name aurelian-docs --compatibility-date 2026-07-22",
+    "release": "pnpm --filter aurelian publish --access public --tag experimental --provenance --no-git-checks"
   },
   "devDependencies": {
     "turbo": "^2.10.5",

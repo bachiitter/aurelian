@@ -19,6 +19,7 @@ export default defineConfig({
     'storage/cloudflare-kv': './src/storage/cloudflare-kv.ts',
     'storage/index': './src/storage/index.ts',
     'storage/memory': './src/storage/memory.ts',
+    'storage/sqlite': './src/storage/sqlite.ts',
   },
   dts: true,
   exports: true,

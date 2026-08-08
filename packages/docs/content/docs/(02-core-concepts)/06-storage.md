@@ -51,6 +51,32 @@ Use it for local development and single-process tests, not distributed deploymen
 
 ---
 
+## Use SQLite
+
+Import the SQLite adapter from its dedicated entry point and pass a prepared database client.
+
+```ts
+import { Database } from 'bun:sqlite'
+import { sqliteStorage } from 'aurelian/storage/sqlite'
+import type { StorageAdapter } from 'aurelian/storage'
+
+const db = new Database('auth.sqlite')
+const storage: StorageAdapter = sqliteStorage({ db })
+```
+
+`sqliteStorage({ db })` creates the `aurelian_storage` table when the database exposes `exec`. Pass `tableName` to use a different table name.
+
+```ts
+const storage = sqliteStorage({
+  db,
+  tableName: 'auth_storage'
+})
+```
+
+Use SQLite for single-node apps or tests. It is not shared across multiple hosts unless your SQLite deployment provides that consistency.
+
+---
+
 ## Use Workers KV
 
 Import the Workers KV adapter and namespace type from the Cloudflare KV entry point.

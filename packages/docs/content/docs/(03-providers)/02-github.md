@@ -62,11 +62,37 @@ export const auth = createAuth({
 })
 ```
 
-`GitHubOptions` requires `clientId` and `clientSecret`; `fetch` and `scopes` are optional. Supply `fetch` for tracing, tests, or a runtime-specific transport.
+`GitHubOptions` requires `clientId` and `clientSecret`; `apiURL`, `authorizationURL`, `enterpriseURL`, `fetch`, `scopes`, and `tokenURL` are optional. Supply `fetch` for tracing, tests, or a runtime-specific transport.
 
 The wrapper explicitly uses `client_secret_post`, placing both client credentials in the token request body.
 
 `createAuth` accepts the supplied client return URI only when it uses HTTP(S). It binds the exact value into one-time provider state and the authorization code, then requires it during PKCE token exchange.
+
+---
+
+## Use GitHub Enterprise
+
+Set `enterpriseURL` for GitHub Enterprise Server. Aurelian uses it for authorization and token exchange, and defaults the API URL to `<enterpriseURL>/api/v3`.
+
+```ts
+const options: GitHubOptions = {
+  clientId: process.env.GITHUB_CLIENT_ID,
+  clientSecret: process.env.GITHUB_CLIENT_SECRET,
+  enterpriseURL: 'https://github.example.com'
+}
+```
+
+Override individual endpoints when your deployment uses custom routing.
+
+```ts
+const options: GitHubOptions = {
+  apiURL: 'https://github.example.com/api/v3',
+  authorizationURL: 'https://github.example.com/login/oauth/authorize',
+  clientId: process.env.GITHUB_CLIENT_ID,
+  clientSecret: process.env.GITHUB_CLIENT_SECRET,
+  tokenURL: 'https://github.example.com/login/oauth/access_token'
+}
+```
 
 ---
 

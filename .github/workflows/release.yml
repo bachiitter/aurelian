@@ -1,0 +1,30 @@
+name: release
+
+on:
+  push:
+    branches:
+      - dev
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter aurelian typecheck
+      - run: pnpm --filter aurelian test
+      - run: pnpm --filter aurelian build
+      - run: pnpm --filter aurelian smoke:dist
+      - run: pnpm run release
