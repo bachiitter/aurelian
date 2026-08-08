@@ -47,6 +47,42 @@ describe('social providers', () => {
     });
   });
 
+  it('loads a GitHub Enterprise identity', async () => {
+    const requests: string[] = [];
+    const provider = github({
+      clientId: 'client_id',
+      clientSecret: 'client_secret',
+      enterpriseURL: 'https://github.example.com',
+      fetch: async (input) => {
+        const url = String(input);
+
+        requests.push(url);
+
+        if (url === 'https://github.example.com/login/oauth/access_token') {
+          return Response.json({ access_token: 'access_token' });
+        }
+
+        if (url === 'https://github.example.com/api/v3/user/emails') {
+          return Response.json([]);
+        }
+
+        return Response.json({ id: 'enterprise-user', login: 'octocat' });
+      },
+    });
+    const app = createProviderTestApp(provider, { callback: callbackInput });
+    const response = await app.request('/callback');
+
+    await expect(response.json()).resolves.toMatchObject({
+      id: 'enterprise-user',
+      username: 'octocat',
+    });
+    expect(requests).toEqual([
+      'https://github.example.com/login/oauth/access_token',
+      'https://github.example.com/api/v3/user',
+      'https://github.example.com/api/v3/user/emails',
+    ]);
+  });
+
   it('loads a Discord identity', async () => {
     const provider = discord({
       clientId: 'client_id',

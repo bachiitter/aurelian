@@ -2,17 +2,25 @@ import type { Provider } from '../types.js';
 import { oauth } from './oauth.js';
 
 const API_URL = 'https://api.github.com';
+const WEB_URL = 'https://github.com';
 
 export type GitHubOptions = {
+  apiURL?: string;
+  authorizationURL?: string;
   clientId: string;
   clientSecret: string;
+  enterpriseURL?: string;
   fetch?: typeof fetch;
   scopes?: string[];
+  tokenURL?: string;
 };
 
 export function github(options: GitHubOptions): Provider {
+  const webURL = options.enterpriseURL?.replace(/\/$/, '') ?? WEB_URL;
+  const apiURL = options.apiURL?.replace(/\/$/, '') ?? (options.enterpriseURL ? `${webURL}/api/v3` : API_URL);
+
   return oauth({
-    authorizationURL: 'https://github.com/login/oauth/authorize',
+    authorizationURL: options.authorizationURL ?? `${webURL}/login/oauth/authorize`,
     clientId: options.clientId,
     clientSecret: options.clientSecret,
     fetch: options.fetch,
@@ -21,7 +29,7 @@ export function github(options: GitHubOptions): Provider {
         accept: 'application/vnd.github+json',
         authorization: `Bearer ${accessToken}`,
       };
-      const userResponse = await fetch(`${API_URL}/user`, { headers });
+      const userResponse = await fetch(`${apiURL}/user`, { headers });
       const user: unknown = await userResponse.json().catch(() => null);
 
       if (
@@ -36,7 +44,7 @@ export function github(options: GitHubOptions): Provider {
         throw new Error('github_identity_failed');
       }
 
-      const emailsResponse = await fetch(`${API_URL}/user/emails`, { headers });
+      const emailsResponse = await fetch(`${apiURL}/user/emails`, { headers });
       const emails: unknown = await emailsResponse.json().catch(() => null);
       let email =
         'email' in user && typeof user.email === 'string'
@@ -83,6 +91,6 @@ export function github(options: GitHubOptions): Provider {
     },
     scopes: ['read:user', 'user:email', ...(options.scopes ?? [])],
     tokenEndpointAuthMethod: 'client_secret_post',
-    tokenURL: 'https://github.com/login/oauth/access_token',
+    tokenURL: options.tokenURL ?? `${webURL}/login/oauth/access_token`,
   });
 }
